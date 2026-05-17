@@ -3,16 +3,11 @@
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability, please **do not** open a public issue.
-
-Instead, email the maintainers directly. We will respond as quickly as possible and work with you on a fix.
+Instead, report it via GitHub's [private vulnerability reporting](https://github.com/array2d/numpycpp/security/advisories/new)
+or contact the maintainers through GitHub Discussions.
 
 ## Supported Versions
 
 | Version | Supported          |
 | ------- | ------------------ |
 | 0.1.x   | :white_check_mark: |
-
-## Security Considerations
-
-- This library performs numerical computation; it does not handle authentication, network I/O, or user data.
-- Report any buffer overflows, memory safety issues, or undefined behavior immediately.

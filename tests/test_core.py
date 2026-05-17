@@ -3,51 +3,69 @@ Precision alignment tests for numpy.* (core.h / core.cpp).
 
 Each test compares the C++ implementation against Python numpy using
 identical inputs and verifies results match within configured tolerance.
+Tests are parametrized over float64 and float32 dtypes for all template functions.
 """
 
 import numpy as np
 import pytest
 
-from conftest import compare, random_array
+from .utils import compare, random_array, tolerance_for
 
 
 # ===========================================================================
-# Array creation
+# Array creation (template: T in → T out)
 # ===========================================================================
 
 
 class TestZerosLike:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((3, 4))
-        info = compare(cpp.zeros_like(a), np.zeros_like(a), rtol, atol, "zeros_like")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((3, 4), dtype=dtype)
+        info = compare(cpp.zeros_like(a), np.zeros_like(a), _rtol, _atol, "zeros_like")
         assert info["pass"], info.get("error")
 
     @pytest.mark.parametrize("shape", [(1,), (5,), (2, 3), (4, 5, 6)])
-    def test_shapes(self, cpp, rtol, atol, shape):
-        a = random_array(shape)
-        info = compare(cpp.zeros_like(a), np.zeros_like(a), rtol, atol, f"zeros_like{shape}")
+    def test_shapes(self, cpp, rtol, atol, dtype, shape):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array(shape, dtype=dtype)
+        info = compare(cpp.zeros_like(a), np.zeros_like(a), _rtol, _atol, f"zeros_like{shape}")
         assert info["pass"], info.get("error")
 
 
 class TestOnesLike:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((3, 4))
-        info = compare(cpp.ones_like(a), np.ones_like(a), rtol, atol, "ones_like")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((3, 4), dtype=dtype)
+        info = compare(cpp.ones_like(a), np.ones_like(a), _rtol, _atol, "ones_like")
         assert info["pass"], info.get("error")
 
     @pytest.mark.parametrize("shape", [(1,), (5,), (2, 3), (1, 1, 1)])
-    def test_shapes(self, cpp, rtol, atol, shape):
-        a = random_array(shape)
-        info = compare(cpp.ones_like(a), np.ones_like(a), rtol, atol, f"ones_like{shape}")
+    def test_shapes(self, cpp, rtol, atol, dtype, shape):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array(shape, dtype=dtype)
+        info = compare(cpp.ones_like(a), np.ones_like(a), _rtol, _atol, f"ones_like{shape}")
         assert info["pass"], info.get("error")
 
 
 class TestFullLike:
     @pytest.mark.parametrize("value", [0.0, 1.0, -3.14, 42.0, 1e10])
-    def test_values(self, cpp, rtol, atol, value):
-        a = random_array((3, 4))
-        info = compare(cpp.full_like(a, value), np.full_like(a, value), rtol, atol, f"full_like({value})")
+    def test_values(self, cpp, rtol, atol, dtype, value):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((3, 4), dtype=dtype)
+        info = compare(cpp.full_like(a, value), np.full_like(a, value), _rtol, _atol, f"full_like({value})")
         assert info["pass"], info.get("error")
+
+
+class TestEmptyLike:
+    def test_shape_matches(self, cpp, rtol, atol, dtype):
+        a = random_array((3, 4), dtype=dtype)
+        cpp_r = cpp.empty_like(a)
+        assert np.asarray(cpp_r).shape == a.shape, "empty_like shape mismatch"
+
+
+# ===========================================================================
+# Array creation (non-template: bool / double-only)
+# ===========================================================================
 
 
 class TestFullLikeBool:
@@ -89,15 +107,8 @@ class TestOnes:
         assert info["pass"], info.get("error")
 
 
-class TestEmptyLike:
-    def test_shape_matches(self, cpp, rtol, atol):
-        a = random_array((3, 4))
-        cpp_r = cpp.empty_like(a)
-        assert np.asarray(cpp_r).shape == a.shape, "empty_like shape mismatch"
-
-
 # ===========================================================================
-# astype
+# astype (non-template: specific types)
 # ===========================================================================
 
 
@@ -135,123 +146,146 @@ class TestTruncateToFloat32:
 
 
 # ===========================================================================
-# Element-wise math
+# Element-wise math (template: T in → T out)
 # ===========================================================================
 
 
 class TestSqrt:
     @pytest.mark.parametrize("shape", [(10,), (3, 4), (2, 3, 4)])
-    def test_shapes(self, cpp, rtol, atol, shape):
-        a = np.abs(random_array(shape))
-        info = compare(cpp.sqrt(a), np.sqrt(a), rtol, atol, f"sqrt{shape}")
+    def test_shapes(self, cpp, rtol, atol, dtype, shape):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.abs(random_array(shape, dtype=dtype))
+        info = compare(cpp.sqrt(a), np.sqrt(a), _rtol, _atol, f"sqrt{shape}")
         assert info["pass"], info.get("error")
 
-    def test_zero(self, cpp, rtol, atol):
-        a = np.zeros((5,), dtype=np.float64)
-        info = compare(cpp.sqrt(a), np.sqrt(a), rtol, atol, "sqrt zero")
+    def test_zero(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.zeros((5,), dtype=dtype)
+        info = compare(cpp.sqrt(a), np.sqrt(a), _rtol, _atol, "sqrt zero")
         assert info["pass"], info.get("error")
 
 
 class TestAbs:
     @pytest.mark.parametrize("shape", [(10,), (3, 4)])
-    def test_shapes(self, cpp, rtol, atol, shape):
-        a = random_array(shape)
-        info = compare(cpp.abs(a), np.abs(a), rtol, atol, f"abs{shape}")
+    def test_shapes(self, cpp, rtol, atol, dtype, shape):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array(shape, dtype=dtype)
+        info = compare(cpp.abs(a), np.abs(a), _rtol, _atol, f"abs{shape}")
         assert info["pass"], info.get("error")
 
 
 class TestExp:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,), seed=1)
-        info = compare(cpp.exp(a), np.exp(a), rtol=1e-10, atol=1e-10, label="exp")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), seed=1, dtype=dtype)
+        info = compare(cpp.exp(a), np.exp(a), _rtol, _atol, label="exp")
         assert info["pass"], info.get("error")
 
 
 class TestLog:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.abs(random_array((10,))) + 0.1
-        info = compare(cpp.log(a), np.log(a), rtol=1e-10, atol=1e-10, label="log")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.abs(random_array((10,), dtype=dtype)) + 0.1
+        info = compare(cpp.log(a), np.log(a), _rtol, _atol, label="log")
         assert info["pass"], info.get("error")
 
 
 class TestSin:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        info = compare(cpp.sin(a), np.sin(a), rtol=1e-10, atol=1e-10, label="sin")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        info = compare(cpp.sin(a), np.sin(a), _rtol, _atol, label="sin")
         assert info["pass"], info.get("error")
 
 
 class TestCos:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        info = compare(cpp.cos(a), np.cos(a), rtol=1e-10, atol=1e-10, label="cos")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        info = compare(cpp.cos(a), np.cos(a), _rtol, _atol, label="cos")
         assert info["pass"], info.get("error")
 
 
 class TestTan:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,)) * 0.5  # avoid poles
-        info = compare(cpp.tan(a), np.tan(a), rtol=1e-8, atol=1e-8, label="tan")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        _rtol = max(_rtol, 1e-7)
+        _atol = max(_atol, 1e-7)
+        a = random_array((10,), dtype=dtype) * 0.5  # avoid poles
+        info = compare(cpp.tan(a), np.tan(a), _rtol, _atol, label="tan")
         assert info["pass"], info.get("error")
 
 
 class TestPower:
     @pytest.mark.parametrize("exp", [2.0, 3.0, 0.5, -1.0, 0.0])
-    def test_exponents(self, cpp, rtol, atol, exp):
-        a = np.abs(random_array((10,))) + 0.01
-        info = compare(cpp.power(a, exp), np.power(a, exp), rtol=1e-10, atol=1e-10, label=f"power({exp})")
+    def test_exponents(self, cpp, rtol, atol, dtype, exp):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.abs(random_array((10,), dtype=dtype)) + 0.01
+        info = compare(cpp.power(a, exp), np.power(a, exp), _rtol, _atol, label=f"power({exp})")
         assert info["pass"], info.get("error")
 
 
 class TestClip:
     @pytest.mark.parametrize("lo,hi", [(0.0, 1.0), (-1.0, 1.0), (0.5, 0.5), (-10.0, 10.0)])
-    def test_bounds(self, cpp, rtol, atol, lo, hi):
-        a = random_array((20,))
-        info = compare(cpp.clip(a, lo, hi), np.clip(a, lo, hi), rtol, atol, f"clip({lo},{hi})")
+    def test_bounds(self, cpp, rtol, atol, dtype, lo, hi):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((20,), dtype=dtype)
+        info = compare(cpp.clip(a, lo, hi), np.clip(a, lo, hi), _rtol, _atol, f"clip({lo},{hi})")
         assert info["pass"], info.get("error")
 
 
 # ===========================================================================
-# Reduction
+# Reduction (template: T in → T out)
 # ===========================================================================
 
 
 class TestSum:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
         cpp_r, py_r = cpp.sum(a), np.sum(a)
-        assert np.allclose(cpp_r, py_r, rtol, atol), f"sum: {cpp_r} vs {py_r}"
+        assert np.allclose(cpp_r, py_r, _rtol, _atol), f"sum: {cpp_r} vs {py_r}"
 
-    def test_2d(self, cpp, rtol, atol):
-        a = random_array((5, 4))
+    def test_2d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((5, 4), dtype=dtype)
         cpp_r, py_r = cpp.sum(a), np.sum(a)
-        assert np.allclose(cpp_r, py_r, rtol, atol), f"sum 2d: {cpp_r} vs {py_r}"
+        assert np.allclose(cpp_r, py_r, _rtol, _atol), f"sum 2d: {cpp_r} vs {py_r}"
 
 
 class TestMean:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
         cpp_r, py_r = cpp.mean(a), np.mean(a)
-        assert np.allclose(cpp_r, py_r, rtol, atol), f"mean: {cpp_r} vs {py_r}"
+        assert np.allclose(cpp_r, py_r, _rtol, _atol), f"mean: {cpp_r} vs {py_r}"
 
-    def test_empty(self, cpp, rtol, atol):
-        a = np.array([], dtype=np.float64)
+    def test_empty(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.array([], dtype=dtype)
         cpp_r, py_r = cpp.mean(a), 0.0  # C++ returns 0 for empty
-        assert np.allclose(cpp_r, py_r, rtol, atol)
+        assert np.allclose(cpp_r, py_r, _rtol, _atol)
 
 
 class TestMax:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
         cpp_r, py_r = cpp.max(a), np.max(a)
-        assert np.allclose(cpp_r, py_r, rtol, atol), f"max: {cpp_r} vs {py_r}"
+        assert np.allclose(cpp_r, py_r, _rtol, _atol), f"max: {cpp_r} vs {py_r}"
 
 
 class TestMin:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
         cpp_r, py_r = cpp.min(a), np.min(a)
-        assert np.allclose(cpp_r, py_r, rtol, atol), f"min: {cpp_r} vs {py_r}"
+        assert np.allclose(cpp_r, py_r, _rtol, _atol), f"min: {cpp_r} vs {py_r}"
+
+
+# ===========================================================================
+# Reduction (bool-only)
+# ===========================================================================
 
 
 class TestAny:
@@ -275,57 +309,57 @@ class TestAll:
 
 
 # ===========================================================================
-# Comparison (element-wise)
+# Comparison (template: T in → bool out)
 # ===========================================================================
 
 
 class TestGreater:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        b = 0.0
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = random_array((10,), dtype=dtype)
+        b = dtype(0.0)
         assert np.array_equal(cpp.greater(a, b), np.greater(a, b))
 
 
 class TestLess:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        b = 0.0
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = random_array((10,), dtype=dtype)
+        b = dtype(0.0)
         assert np.array_equal(cpp.less(a, b), np.less(a, b))
 
 
 class TestEqual:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([0.0, 1.0, 1.0, 0.0], dtype=np.float64)
-        assert np.array_equal(cpp.equal(a, 1.0), np.equal(a, 1.0))
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = np.array([0.0, 1.0, 1.0, 0.0], dtype=dtype)
+        assert np.array_equal(cpp.equal(a, dtype(1.0)), np.equal(a, dtype(1.0)))
 
 
 class TestGreaterEqual:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        b = 0.0
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = random_array((10,), dtype=dtype)
+        b = dtype(0.0)
         assert np.array_equal(cpp.greater_equal(a, b), np.greater_equal(a, b))
 
 
 class TestLessEqual:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        b = 0.0
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = random_array((10,), dtype=dtype)
+        b = dtype(0.0)
         assert np.array_equal(cpp.less_equal(a, b), np.less_equal(a, b))
 
 
 class TestNotEqual:
-    def test_scalar(self, cpp, rtol, atol):
-        a = np.array([0.0, 1.0, 0.0], dtype=np.float64)
-        assert np.array_equal(cpp.not_equal(a, 0.0), np.not_equal(a, 0.0))
+    def test_scalar(self, cpp, rtol, atol, dtype):
+        a = np.array([0.0, 1.0, 0.0], dtype=dtype)
+        assert np.array_equal(cpp.not_equal(a, dtype(0.0)), np.not_equal(a, dtype(0.0)))
 
-    def test_array(self, cpp, rtol, atol):
-        a = random_array((10,))
-        b = random_array((10,), seed=99)
+    def test_array(self, cpp, rtol, atol, dtype):
+        a = random_array((10,), dtype=dtype)
+        b = random_array((10,), seed=99, dtype=dtype)
         assert np.array_equal(cpp.not_equal(a, b), np.not_equal(a, b))
 
 
 # ===========================================================================
-# Logical (element-wise)
+# Logical (bool-only)
 # ===========================================================================
 
 
@@ -357,305 +391,348 @@ class TestLogicalXor:
 
 
 # ===========================================================================
-# Special value helpers
+# Special value helpers (template: T in → bool out)
 # ===========================================================================
 
 
 class TestIsnan:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([0.0, np.nan, 1.0, np.nan])
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = np.array([0.0, np.nan, 1.0, np.nan], dtype=dtype)
         assert np.array_equal(cpp.isnan(a), np.isnan(a))
 
 
 class TestIsinf:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([0.0, np.inf, -np.inf, 1.0])
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = np.array([0.0, np.inf, -np.inf, 1.0], dtype=dtype)
         assert np.array_equal(cpp.isinf(a), np.isinf(a))
 
 
 class TestIsfinite:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([0.0, np.inf, np.nan, 1.0, -np.inf])
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = np.array([0.0, np.inf, np.nan, 1.0, -np.inf], dtype=dtype)
         assert np.array_equal(cpp.isfinite(a), np.isfinite(a))
 
 
 # ===========================================================================
-# Additional math (element-wise)
+# Additional math (template: T in → T out)
 # ===========================================================================
 
 
 class TestLog10:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.abs(random_array((10,))) + 0.1
-        info = compare(cpp.log10(a), np.log10(a), rtol=1e-10, atol=1e-10, label="log10")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.abs(random_array((10,), dtype=dtype)) + 0.1
+        info = compare(cpp.log10(a), np.log10(a), _rtol, _atol, label="log10")
         assert info["pass"], info.get("error")
 
 
 class TestLog2:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.abs(random_array((10,))) + 0.1
-        info = compare(cpp.log2(a), np.log2(a), rtol=1e-10, atol=1e-10, label="log2")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.abs(random_array((10,), dtype=dtype)) + 0.1
+        info = compare(cpp.log2(a), np.log2(a), _rtol, _atol, label="log2")
         assert info["pass"], info.get("error")
 
 
 class TestArcsin:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,)) * 0.5  # domain [-0.5, 0.5]
-        info = compare(cpp.arcsin(a), np.arcsin(a), rtol=1e-10, atol=1e-10, label="arcsin")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype) * 0.5  # domain [-0.5, 0.5]
+        info = compare(cpp.arcsin(a), np.arcsin(a), _rtol, _atol, label="arcsin")
         assert info["pass"], info.get("error")
 
 
 class TestArccos:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,)) * 0.5  # domain [-0.5, 0.5]
-        info = compare(cpp.arccos(a), np.arccos(a), rtol=1e-10, atol=1e-10, label="arccos")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype) * 0.5  # domain [-0.5, 0.5]
+        info = compare(cpp.arccos(a), np.arccos(a), _rtol, _atol, label="arccos")
         assert info["pass"], info.get("error")
 
 
 class TestArctan:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        info = compare(cpp.arctan(a), np.arctan(a), rtol=1e-10, atol=1e-10, label="arctan")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        info = compare(cpp.arctan(a), np.arctan(a), _rtol, _atol, label="arctan")
         assert info["pass"], info.get("error")
 
 
 class TestRound:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,)) * 10
-        info = compare(cpp.round(a), np.round(a), rtol, atol, "round")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype) * 10
+        info = compare(cpp.round(a), np.round(a), _rtol, _atol, "round")
         assert info["pass"], info.get("error")
 
 
 class TestFloor:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,)) * 10
-        info = compare(cpp.floor(a), np.floor(a), rtol, atol, "floor")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype) * 10
+        info = compare(cpp.floor(a), np.floor(a), _rtol, _atol, "floor")
         assert info["pass"], info.get("error")
 
 
 class TestCeil:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,)) * 10
-        info = compare(cpp.ceil(a), np.ceil(a), rtol, atol, "ceil")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype) * 10
+        info = compare(cpp.ceil(a), np.ceil(a), _rtol, _atol, "ceil")
         assert info["pass"], info.get("error")
 
 
 class TestDegrees:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        info = compare(cpp.degrees(a), np.degrees(a), rtol, atol, "degrees")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        info = compare(cpp.degrees(a), np.degrees(a), _rtol, _atol, "degrees")
         assert info["pass"], info.get("error")
 
 
 class TestRadians:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        info = compare(cpp.radians(a), np.radians(a), rtol, atol, "radians")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        info = compare(cpp.radians(a), np.radians(a), _rtol, _atol, "radians")
         assert info["pass"], info.get("error")
 
 
 class TestSign:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10,))
-        info = compare(cpp.sign(a), np.sign(a), rtol, atol, "sign")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        info = compare(cpp.sign(a), np.sign(a), _rtol, _atol, "sign")
         assert info["pass"], info.get("error")
 
-    def test_zero(self, cpp, rtol, atol):
-        a = np.array([0.0, -0.0, 0.0], dtype=np.float64)
-        info = compare(cpp.sign(a), np.sign(a), rtol, atol, "sign zero")
+    def test_zero(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.array([0.0, -0.0, 0.0], dtype=dtype)
+        info = compare(cpp.sign(a), np.sign(a), _rtol, _atol, "sign zero")
         assert info["pass"], info.get("error")
 
 
 # ===========================================================================
-# Binary element-wise
+# Binary element-wise (template: T in → T out)
 # ===========================================================================
 
 
 class TestArctan2:
-    def test_array_array(self, cpp, rtol, atol):
-        a = random_array((10,))
-        b = np.abs(random_array((10,))) + 0.1
-        info = compare(cpp.arctan2(a, b), np.arctan2(a, b), rtol=1e-10, atol=1e-10, label="arctan2(a,b)")
+    def test_array_array(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        b = np.abs(random_array((10,), dtype=dtype)) + 0.1
+        info = compare(cpp.arctan2(a, b), np.arctan2(a, b), _rtol, _atol, label="arctan2(a,b)")
         assert info["pass"], info.get("error")
 
-    def test_array_scalar(self, cpp, rtol, atol):
-        a = random_array((10,))
-        info = compare(cpp.arctan2(a, 1.0), np.arctan2(a, 1.0), rtol=1e-10, atol=1e-10, label="arctan2(a,1)")
+    def test_array_scalar(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        info = compare(cpp.arctan2(a, dtype(1.0)), np.arctan2(a, dtype(1.0)), _rtol, _atol, label="arctan2(a,1)")
         assert info["pass"], info.get("error")
 
 
 class TestMaximum:
-    def test_array_array(self, cpp, rtol, atol):
-        a = random_array((10,), seed=1)
-        b = random_array((10,), seed=2)
-        info = compare(cpp.maximum(a, b), np.maximum(a, b), rtol, atol, "maximum(a,b)")
+    def test_array_array(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), seed=1, dtype=dtype)
+        b = random_array((10,), seed=2, dtype=dtype)
+        info = compare(cpp.maximum(a, b), np.maximum(a, b), _rtol, _atol, "maximum(a,b)")
         assert info["pass"], info.get("error")
 
-    def test_array_scalar(self, cpp, rtol, atol):
-        a = random_array((10,))
-        info = compare(cpp.maximum(a, 0.0), np.maximum(a, 0.0), rtol, atol, "maximum(a,0)")
+    def test_array_scalar(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        info = compare(cpp.maximum(a, dtype(0.0)), np.maximum(a, dtype(0.0)), _rtol, _atol, "maximum(a,0)")
         assert info["pass"], info.get("error")
 
 
 class TestMinimum:
-    def test_array_array(self, cpp, rtol, atol):
-        a = random_array((10,), seed=1)
-        b = random_array((10,), seed=2)
-        info = compare(cpp.minimum(a, b), np.minimum(a, b), rtol, atol, "minimum(a,b)")
+    def test_array_array(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), seed=1, dtype=dtype)
+        b = random_array((10,), seed=2, dtype=dtype)
+        info = compare(cpp.minimum(a, b), np.minimum(a, b), _rtol, _atol, "minimum(a,b)")
         assert info["pass"], info.get("error")
 
-    def test_array_scalar(self, cpp, rtol, atol):
-        a = random_array((10,))
-        info = compare(cpp.minimum(a, 0.0), np.minimum(a, 0.0), rtol, atol, "minimum(a,0)")
+    def test_array_scalar(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10,), dtype=dtype)
+        info = compare(cpp.minimum(a, dtype(0.0)), np.minimum(a, dtype(0.0)), _rtol, _atol, "minimum(a,0)")
         assert info["pass"], info.get("error")
 
 
 # ===========================================================================
-# Array manipulation
+# Array manipulation (template: T in → T out)
 # ===========================================================================
 
 
 class TestDiff:
-    def test_1d(self, cpp, rtol, atol):
-        a = np.array([1.0, 3.0, 6.0, 10.0])
-        info = compare(cpp.diff(a), np.diff(a), rtol, atol, "diff 1d")
+    def test_1d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.array([1.0, 3.0, 6.0, 10.0], dtype=dtype)
+        info = compare(cpp.diff(a), np.diff(a), _rtol, _atol, "diff 1d")
         assert info["pass"], info.get("error")
 
-    def test_2d_axis0(self, cpp, rtol, atol):
-        a = random_array((5, 4))
-        info = compare(cpp.diff(a, 1, 0), np.diff(a, n=1, axis=0), rtol, atol, "diff axis=0")
+    def test_2d_axis0(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((5, 4), dtype=dtype)
+        info = compare(cpp.diff(a, 1, 0), np.diff(a, n=1, axis=0), _rtol, _atol, "diff axis=0")
         assert info["pass"], info.get("error")
 
-    def test_2d_axis1(self, cpp, rtol, atol):
-        a = random_array((5, 4))
-        info = compare(cpp.diff(a, 1, 1), np.diff(a, n=1, axis=1), rtol, atol, "diff axis=1")
+    def test_2d_axis1(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((5, 4), dtype=dtype)
+        info = compare(cpp.diff(a, 1, 1), np.diff(a, n=1, axis=1), _rtol, _atol, "diff axis=1")
         assert info["pass"], info.get("error")
 
-    def test_2d_axis_neg1(self, cpp, rtol, atol):
-        a = random_array((5, 4))
-        info = compare(cpp.diff(a, 1, -1), np.diff(a, n=1, axis=-1), rtol, atol, "diff axis=-1")
+    def test_2d_axis_neg1(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((5, 4), dtype=dtype)
+        info = compare(cpp.diff(a, 1, -1), np.diff(a, n=1, axis=-1), _rtol, _atol, "diff axis=-1")
         assert info["pass"], info.get("error")
 
 
 class TestStack:
-    def test_basic(self, cpp, rtol, atol):
-        arrays = [random_array((3,), seed=i) for i in range(4)]
-        info = compare(cpp.stack(arrays), np.stack(arrays), rtol, atol, "stack")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(4)]
+        info = compare(cpp.stack(arrays), np.stack(arrays), _rtol, _atol, "stack")
         assert info["pass"], info.get("error")
 
 
 class TestConcatenate:
-    def test_basic(self, cpp, rtol, atol):
-        arrays = [random_array((3,), seed=i) for i in range(3)]
-        info = compare(cpp.concatenate(arrays), np.concatenate(arrays), rtol, atol, "concatenate")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(3)]
+        info = compare(cpp.concatenate(arrays), np.concatenate(arrays), _rtol, _atol, "concatenate")
         assert info["pass"], info.get("error")
 
 
 class TestVstack:
-    def test_basic(self, cpp, rtol, atol):
-        arrays = [random_array((1, 3), seed=i) for i in range(4)]
-        info = compare(cpp.vstack(arrays), np.vstack(arrays), rtol, atol, "vstack")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        arrays = [random_array((1, 3), seed=i, dtype=dtype) for i in range(4)]
+        info = compare(cpp.vstack(arrays), np.vstack(arrays), _rtol, _atol, "vstack")
         assert info["pass"], info.get("error")
 
 
 class TestHstack:
-    def test_basic(self, cpp, rtol, atol):
-        arrays = [random_array((3,), seed=i) for i in range(3)]
-        info = compare(cpp.hstack(arrays), np.hstack(arrays), rtol, atol, "hstack")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(3)]
+        info = compare(cpp.hstack(arrays), np.hstack(arrays), _rtol, _atol, "hstack")
         assert info["pass"], info.get("error")
 
 
 class TestWhere:
-    def test_scalar(self, cpp, rtol, atol):
+    def test_scalar(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
         cond = np.array([True, False, True, False, True])
-        info = compare(cpp.where(cond, 10.0, -1.0), np.where(cond, 10.0, -1.0), rtol, atol, "where scalar")
+        info = compare(cpp.where(cond, dtype(10.0), dtype(-1.0)),
+                       np.where(cond, dtype(10.0), dtype(-1.0)),
+                       _rtol, _atol, "where scalar")
         assert info["pass"], info.get("error")
 
-    def test_array(self, cpp, rtol, atol):
+    def test_array(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
         cond = np.array([True, False, True, False])
-        x = np.array([1.0, 2.0, 3.0, 4.0])
-        y = np.array([-1.0, -2.0, -3.0, -4.0])
-        info = compare(cpp.where(cond, x, y), np.where(cond, x, y), rtol, atol, "where array")
+        x = np.array([1.0, 2.0, 3.0, 4.0], dtype=dtype)
+        y = np.array([-1.0, -2.0, -3.0, -4.0], dtype=dtype)
+        info = compare(cpp.where(cond, x, y), np.where(cond, x, y), _rtol, _atol, "where array")
         assert info["pass"], info.get("error")
 
 
 class TestTranspose:
-    def test_1d(self, cpp, rtol, atol):
-        a = random_array((5,))
-        info = compare(cpp.transpose(a), np.transpose(a), rtol, atol, "transpose 1d")
+    def test_1d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((5,), dtype=dtype)
+        info = compare(cpp.transpose(a), np.transpose(a), _rtol, _atol, "transpose 1d")
         assert info["pass"], info.get("error")
 
-    def test_2d(self, cpp, rtol, atol):
-        a = random_array((3, 5))
-        info = compare(cpp.transpose(a), np.transpose(a), rtol, atol, "transpose 2d")
+    def test_2d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((3, 5), dtype=dtype)
+        info = compare(cpp.transpose(a), np.transpose(a), _rtol, _atol, "transpose 2d")
         assert info["pass"], info.get("error")
 
 
 class TestFlatten:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((3, 4))
-        info = compare(cpp.flatten(a), a.flatten(), rtol, atol, "flatten")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((3, 4), dtype=dtype)
+        info = compare(cpp.flatten(a), a.flatten(), _rtol, _atol, "flatten")
         assert info["pass"], info.get("error")
 
 
 class TestMeanAxis:
-    def test_axis0_2d(self, cpp, rtol, atol):
-        a = random_array((4, 5))
-        info = compare(cpp.mean(a, 0), np.mean(a, axis=0), rtol, atol, "mean axis=0")
+    def test_axis0_2d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((4, 5), dtype=dtype)
+        info = compare(cpp.mean(a, 0), np.mean(a, axis=0), _rtol, _atol, "mean axis=0")
         assert info["pass"], info.get("error")
 
-    def test_axis1_2d(self, cpp, rtol, atol):
-        a = random_array((4, 5))
-        info = compare(cpp.mean(a, 1), np.mean(a, axis=1), rtol, atol, "mean axis=1")
+    def test_axis1_2d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((4, 5), dtype=dtype)
+        info = compare(cpp.mean(a, 1), np.mean(a, axis=1), _rtol, _atol, "mean axis=1")
         assert info["pass"], info.get("error")
 
-    def test_axis_neg1_2d(self, cpp, rtol, atol):
-        a = random_array((4, 5))
-        info = compare(cpp.mean(a, -1), np.mean(a, axis=-1), rtol, atol, "mean axis=-1")
+    def test_axis_neg1_2d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((4, 5), dtype=dtype)
+        info = compare(cpp.mean(a, -1), np.mean(a, axis=-1), _rtol, _atol, "mean axis=-1")
         assert info["pass"], info.get("error")
 
-    def test_axis0_3d(self, cpp, rtol, atol):
-        a = random_array((3, 4, 5))
-        info = compare(cpp.mean(a, 0), np.mean(a, axis=0), rtol, atol, "mean 3d axis=0")
+    def test_axis0_3d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((3, 4, 5), dtype=dtype)
+        info = compare(cpp.mean(a, 0), np.mean(a, axis=0), _rtol, _atol, "mean 3d axis=0")
         assert info["pass"], info.get("error")
 
-    def test_axis1_3d(self, cpp, rtol, atol):
-        a = random_array((3, 4, 5))
-        info = compare(cpp.mean(a, 1), np.mean(a, axis=1), rtol, atol, "mean 3d axis=1")
+    def test_axis1_3d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((3, 4, 5), dtype=dtype)
+        info = compare(cpp.mean(a, 1), np.mean(a, axis=1), _rtol, _atol, "mean 3d axis=1")
         assert info["pass"], info.get("error")
 
-    def test_axis2_3d(self, cpp, rtol, atol):
-        a = random_array((3, 4, 5))
-        info = compare(cpp.mean(a, 2), np.mean(a, axis=2), rtol, atol, "mean 3d axis=2")
+    def test_axis2_3d(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((3, 4, 5), dtype=dtype)
+        info = compare(cpp.mean(a, 2), np.mean(a, axis=2), _rtol, _atol, "mean 3d axis=2")
         assert info["pass"], info.get("error")
 
 
 class TestSlice:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((10, 3))
-        info = compare(cpp.slice(a, 2, 7), a[2:7], rtol, atol, "slice 2:7")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10, 3), dtype=dtype)
+        info = compare(cpp.slice(a, 2, 7), a[2:7], _rtol, _atol, "slice 2:7")
         assert info["pass"], info.get("error")
 
-    def test_from_start(self, cpp, rtol, atol):
-        a = random_array((10, 3))
-        info = compare(cpp.slice(a, 0, 5), a[0:5], rtol, atol, "slice :5")
+    def test_from_start(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((10, 3), dtype=dtype)
+        info = compare(cpp.slice(a, 0, 5), a[0:5], _rtol, _atol, "slice :5")
         assert info["pass"], info.get("error")
 
 
 class TestTakeCols:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((4, 6))
-        info = compare(cpp.take_cols(a, 3), a[:, :3], rtol, atol, "take_cols 3")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((4, 6), dtype=dtype)
+        info = compare(cpp.take_cols(a, 3), a[:, :3], _rtol, _atol, "take_cols 3")
         assert info["pass"], info.get("error")
 
 
 class TestSliceAssign:
-    def test_double(self, cpp, rtol, atol):
-        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        cpp.slice_assign(a, 2, 99.0)
-        expected = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        expected[2:] = 99.0
-        info = compare(a, expected, rtol, atol, "slice_assign double")
+    def test_double(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
+        cpp.slice_assign(a, 2, float(99.0))
+        expected = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
+        expected[2:] = float(99.0)
+        info = compare(a, expected, _rtol, _atol, "slice_assign double")
         assert info["pass"], info.get("error")
 
     def test_int(self, cpp, rtol, atol):
@@ -674,64 +751,97 @@ class TestSliceAssign:
 
 
 class TestRoll:
-    def test_positive(self, cpp, rtol, atol):
-        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        info = compare(cpp.roll(a, 2), np.roll(a, 2), rtol, atol, "roll +2")
+    def test_positive(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
+        info = compare(cpp.roll(a, 2), np.roll(a, 2), _rtol, _atol, "roll +2")
         assert info["pass"], info.get("error")
 
-    def test_negative(self, cpp, rtol, atol):
-        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        info = compare(cpp.roll(a, -1), np.roll(a, -1), rtol, atol, "roll -1")
+    def test_negative(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
+        info = compare(cpp.roll(a, -1), np.roll(a, -1), _rtol, _atol, "roll -1")
         assert info["pass"], info.get("error")
 
 
 class TestFlip:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([1.0, 2.0, 3.0, 4.0])
-        info = compare(cpp.flip(a), np.flip(a), rtol, atol, "flip")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.array([1.0, 2.0, 3.0, 4.0], dtype=dtype)
+        info = compare(cpp.flip(a), np.flip(a), _rtol, _atol, "flip")
         assert info["pass"], info.get("error")
 
 
 class TestRepeat:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([1.0, 2.0, 3.0])
-        info = compare(cpp.repeat(a, 3), np.repeat(a, 3), rtol, atol, "repeat")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.array([1.0, 2.0, 3.0], dtype=dtype)
+        info = compare(cpp.repeat(a, 3), np.repeat(a, 3), _rtol, _atol, "repeat")
         assert info["pass"], info.get("error")
 
 
 class TestTile:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([1.0, 2.0, 3.0])
-        info = compare(cpp.tile(a, 2), np.tile(a, 2), rtol, atol, "tile")
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.array([1.0, 2.0, 3.0], dtype=dtype)
+        info = compare(cpp.tile(a, 2), np.tile(a, 2), _rtol, _atol, "tile")
         assert info["pass"], info.get("error")
 
 
 # ===========================================================================
-# Statistical
+# Statistical (template: T in → T out)
 # ===========================================================================
 
 
 class TestStd:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((100,))
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((100,), dtype=dtype)
         cpp_r, py_r = cpp.std(a), np.std(a)
-        assert np.allclose(cpp_r, py_r, rtol, atol), f"std: {cpp_r} vs {py_r}"
+        assert np.allclose(cpp_r, py_r, _rtol, _atol), f"std: {cpp_r} vs {py_r}"
 
-    def test_constant(self, cpp, rtol, atol):
-        a = np.ones((50,), dtype=np.float64) * 3.0
+    def test_constant(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = np.ones((50,), dtype=dtype) * dtype(3.0)
         cpp_r, py_r = cpp.std(a), np.std(a)
-        assert np.allclose(cpp_r, py_r, rtol, atol), f"std constant: {cpp_r} vs {py_r}"
+        assert np.allclose(cpp_r, py_r, _rtol, _atol), f"std constant: {cpp_r} vs {py_r}"
 
 
 class TestVar:
-    def test_basic(self, cpp, rtol, atol):
-        a = random_array((100,))
+    def test_basic(self, cpp, rtol, atol, dtype):
+        _rtol, _atol = tolerance_for(dtype, rtol, atol)
+        a = random_array((100,), dtype=dtype)
         cpp_r, py_r = cpp.var(a), np.var(a)
-        assert np.allclose(cpp_r, py_r, rtol, atol), f"var: {cpp_r} vs {py_r}"
+        assert np.allclose(cpp_r, py_r, _rtol, _atol), f"var: {cpp_r} vs {py_r}"
 
 
 # ===========================================================================
-# Set operations
+# Sorting and indexing (template: T in → ssize_t out)
+# ===========================================================================
+
+
+class TestArgsort:
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = np.array([3.0, 1.0, 4.0, 1.0, 5.0], dtype=dtype)
+        cpp_r = np.asarray(cpp.argsort(a))
+        py_r = np.argsort(a, kind='stable')
+        assert np.array_equal(cpp_r, py_r), f"argsort: {cpp_r} vs {py_r}"
+
+
+class TestArgmax:
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = np.array([1.0, 5.0, 3.0, 9.0, 2.0], dtype=dtype)
+        assert cpp.argmax(a) == np.argmax(a)
+
+
+class TestArgmin:
+    def test_basic(self, cpp, rtol, atol, dtype):
+        a = np.array([5.0, 1.0, 3.0, 0.5, 2.0], dtype=dtype)
+        assert cpp.argmin(a) == np.argmin(a)
+
+
+# ===========================================================================
+# Set operations / Interpolation (double-only)
 # ===========================================================================
 
 
@@ -750,11 +860,6 @@ class TestIntersect1d:
         py_r = np.intersect1d(a, b)
         info = compare(cpp_r, py_r, rtol, atol, "intersect1d")
         assert info["pass"], info.get("error")
-
-
-# ===========================================================================
-# Interpolation
-# ===========================================================================
 
 
 class TestInterp:
@@ -781,32 +886,7 @@ class TestInterp:
 
 
 # ===========================================================================
-# Sorting and indexing
-# ===========================================================================
-
-
-class TestArgsort:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([3.0, 1.0, 4.0, 1.0, 5.0])
-        cpp_r = np.asarray(cpp.argsort(a))
-        py_r = np.argsort(a, kind='stable')
-        assert np.array_equal(cpp_r, py_r), f"argsort: {cpp_r} vs {py_r}"
-
-
-class TestArgmax:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([1.0, 5.0, 3.0, 9.0, 2.0])
-        assert cpp.argmax(a) == np.argmax(a)
-
-
-class TestArgmin:
-    def test_basic(self, cpp, rtol, atol):
-        a = np.array([5.0, 1.0, 3.0, 0.5, 2.0])
-        assert cpp.argmin(a) == np.argmin(a)
-
-
-# ===========================================================================
-# Safe division
+# Safe division (double-only)
 # ===========================================================================
 
 
@@ -822,7 +902,7 @@ class TestSafeDivide:
 
 
 # ===========================================================================
-# Array access
+# Array access (non-template: fixed types)
 # ===========================================================================
 
 
@@ -840,7 +920,7 @@ class TestArrayGet:
 
 
 # ===========================================================================
-# Conversion
+# Conversion (non-template: double-only)
 # ===========================================================================
 
 
@@ -857,7 +937,7 @@ class TestAsarray:
 
 
 # ===========================================================================
-# to_vector
+# to_vector (non-template: bool/double)
 # ===========================================================================
 
 

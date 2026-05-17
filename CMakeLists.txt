@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(numpycpp VERSION 0.1.0 LANGUAGES CXX)
 
-# C++20
-set(CMAKE_CXX_STANDARD 20)
+# C++17
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -15,10 +15,10 @@ find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
-# Collect sources
-file(GLOB SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/numpy/*.cpp)
+# Collect sources (pybind11 bindings in pycpp/)
+file(GLOB SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/pycpp/*.cpp)
 
-# Headers
+# Headers — native (numpy/) and pybind11 wrappers (pycpp/)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 # Python module
@@ -34,7 +34,7 @@ set_target_properties(numpycpp PROPERTIES
 )
 
 # Install
-install(TARGETS numpcpp
+install(TARGETS numpycpp
     LIBRARY DESTINATION ${Python3_SITEARCH}
 )
 

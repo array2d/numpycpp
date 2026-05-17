@@ -1,7 +1,7 @@
 # numpcpp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 [![CMake](https://img.shields.io/badge/CMake-%3E%3D3.16-green.svg)](https://cmake.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -15,7 +15,7 @@ C++ pixel-level alignment of Python numpy, powered by [Eigen](https://eigen.tuxf
 
 ### Dependencies
 
-- **C++20** compiler (GCC >= 11, Clang >= 14, MSVC >= 2022)
+- **C++17** compiler (GCC >= 9, Clang >= 7, MSVC >= 2019)
 - **[Eigen3](https://eigen.tuxfamily.org/)** >= 3.3
 - **[pybind11](https://github.com/pybind/pybind11)**
 - **CMake** >= 3.16
