@@ -38,13 +38,27 @@ double s = numpy::sum(data.data(), data.size());
 
 ### Install
 
+**Ubuntu (DEB)**
+
+Download the [latest `.deb` release](https://github.com/array2d/numpycpp/releases) or build from source:
+
 ```bash
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make deb
 sudo dpkg -i numpcpp-dev-*.deb
-# headers installed to /usr/include/numpycpp/
 ```
+
+Headers are installed to `/usr/include/numpycpp/` along with CMake config. Consuming projects use:
+
+```cmake
+find_package(numpycpp REQUIRED)
+target_link_libraries(myapp PRIVATE numpycpp::numpycpp)
+```
+
+**Manual (header-only)**
+
+Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly. No build step, no copy required.
 
 ### Testing
 

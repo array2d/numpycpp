@@ -6,10 +6,39 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ---- INTERFACE target for find_package consumers ----------------------------
+add_library(numpycpp INTERFACE)
+target_include_directories(numpycpp INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include/numpycpp>
+)
+target_compile_features(numpycpp INTERFACE cxx_std_17)
+
 # ---- Install — header-only C++ library --------------------------------------
-install(DIRECTORY numpy/
+install(DIRECTORY numpy
     DESTINATION include/numpycpp
     FILES_MATCHING PATTERN "*.h"
+)
+
+install(TARGETS numpycpp
+    EXPORT numpycpp-targets
+    DESTINATION lib/cmake/numpycpp
+)
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    numpycpp-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/numpycpp-config.cmake
+    INSTALL_DESTINATION lib/cmake/numpycpp
+)
+
+install(EXPORT numpycpp-targets
+    NAMESPACE numpycpp::
+    DESTINATION lib/cmake/numpycpp
+)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/numpycpp-config.cmake
+    DESTINATION lib/cmake/numpycpp
 )
 
 # ---- CPack DEB packaging ----------------------------------------------------
