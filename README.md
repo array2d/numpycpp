@@ -5,28 +5,27 @@
 [![CMake](https://img.shields.io/badge/CMake-%3E%3D3.16-green.svg)](https://cmake.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-## 背景
+## Background
 
-NumPy 的性能已经很快了，但它的上限被 Python 锁死了。
+NumPy is fast — but its ceiling is locked by Python.
 
-我们创建了 `numpycpp` — 保留 NumPy 的使用习惯，但允许 C++ 突破 Python 的性能天花板，进一步加速你的代码。
+We created `numpycpp` to keep NumPy's familiar usage patterns while letting C++ break through Python's performance ceiling and accelerate your code further.
 
-## 概述
+## Overview
 
-`numpycpp` 是一个 **header-only C++ 库**，用 raw pointer + size 接口实现了 numpy 核心 API（`numpy.*`、`numpy.linalg.*`、`numpy.einsum`）的像素级对齐。零外部依赖，纯 C++17 标准库即可编译。
+`numpycpp` is a **header-only C++ library** implementing numpy's core API (`numpy.*`, `numpy.linalg.*`, `numpy.einsum`) with pixel-level precision alignment. Raw pointer + size interface. Zero external dependencies — pure C++17 standard library.
 
-## 快速开始
+## Quick Start
 
-### 依赖
+### Dependencies
 
-- **C++17** 编译器 (GCC >= 9, Clang >= 7, MSVC >= 2019)
+- **C++17** compiler (GCC >= 9, Clang >= 7, MSVC >= 2019)
 
-### 使用
+### Usage
 
 ```cpp
 #include "numpy/core.h"
 
-// 纯 C++ 调用，无 pybind11 依赖
 std::vector<double> data = {1.0, 4.0, 9.0};
 std::vector<double> result(data.size());
 
@@ -37,46 +36,46 @@ double s = numpy::sum(data.data(), data.size());
 // s → 14.0
 ```
 
-### 安装
+### Install
 
 ```bash
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
-make deb                # 生成 numpcpp-dev-1.21.2-Linux.deb
-sudo dpkg -i numpcpp-dev-1.21.2-Linux.deb
-# 头文件安装至 /usr/include/numpycpp/
+make deb
+sudo dpkg -i numpcpp-dev-*.deb
+# headers installed to /usr/include/numpycpp/
 ```
 
-### 精度测试
+### Testing
 
-测试套件验证每个 C++ 函数与 Python numpy 的**像素级精度对齐**。
+The test suite verifies pixel-level precision alignment between every C++ function and Python numpy.
 
 ```bash
 cd tests
-make                    # 编译测试模块
-make test               # 运行全部 336 个测试
+make                    # compile test module
+make test               # run all 336 tests
 ```
 
-## 项目结构
+## Project Structure
 
 ```
 numpycpp/
-├── numpy/              # 纯 C++ 头文件（零依赖）
-│   ├── core.h          # numpy.* 等价函数（~80个）
-│   ├── linalg.h        # numpy.linalg.* 等价函数
-│   └── einsum.h        # numpy.einsum 等价实现
-├── pycpp/              # pybind11 包装层（可选引用）
+├── numpy/              # native C++ headers (zero dependency)
+│   ├── core.h          # numpy.* equivalents (~80 functions)
+│   ├── linalg.h        # numpy.linalg.* equivalents
+│   └── einsum.h        # numpy.einsum
+├── pycpp/              # pybind11 wrappers (optional)
 │   ├── core_py.h
 │   ├── linalg_py.h
 │   └── einsum_py.h
-├── tests/              # Python 精度测试 + 测试用模块
-│   ├── module.cpp      # 测试用 pybind11 模块
+├── tests/              # precision tests + test module
+│   ├── module.cpp      # pybind11 module for testing
 │   ├── Makefile
 │   └── test_*.py
-├── CMakeLists.txt      # 构建 & .deb 打包
+├── CMakeLists.txt      # build & .deb packaging
 └── README.md
 ```
 
-## 许可
+## License
 
 [MIT](LICENSE)
