@@ -18,4 +18,10 @@ set_target_properties(numpycpp PROPERTIES
 
 add_library(numpycpp::numpycpp ALIAS numpycpp)
 
+# Fallback variables for environments where CMake targets are unreliable
+# (e.g. pybind11_add_module may lose targets during generation with
+# certain CMake / pybind11 version combinations).
+# Usage: target_include_directories(mymod PRIVATE ${numpycpp_INCLUDE_DIRS})
+set(numpycpp_INCLUDE_DIRS "${PACKAGE_PREFIX_DIR}/include/numpycpp")
+
 check_required_components(numpycpp)

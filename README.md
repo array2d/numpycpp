@@ -56,6 +56,19 @@ find_package(numpycpp REQUIRED)
 target_link_libraries(myapp PRIVATE numpycpp::numpycpp)
 ```
 
+**pybind11_add_module users**
+
+With certain CMake / pybind11 version combinations, `pybind11_add_module` may lose IMPORTED targets
+during generation (target exists at configure time but disappears at generate time).
+If you hit this, use the variables-based fallback:
+
+```cmake
+find_package(numpycpp REQUIRED)
+pybind11_add_module(mymodule module.cpp)
+target_include_directories(mymodule PRIVATE ${numpycpp_INCLUDE_DIRS})
+target_compile_features(mymodule PRIVATE cxx_std_17)
+```
+
 **Manual (header-only)**
 
 Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly. No build step, no copy required.
