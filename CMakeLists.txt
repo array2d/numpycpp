@@ -1,49 +1,40 @@
 cmake_minimum_required(VERSION 3.16)
-project(numpycpp VERSION 0.1.0 LANGUAGES CXX)
+project(numpycpp VERSION 1.21.2 LANGUAGES CXX)
 
 # C++17
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
-endif()
-
-# Dependencies
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
-find_package(pybind11 CONFIG REQUIRED)
-find_package(Eigen3 3.3 REQUIRED NO_MODULE)
-
-# Collect sources (pybind11 bindings in pycpp/)
-file(GLOB SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/pycpp/*.cpp)
-
-# Headers — native (numpy/) and pybind11 wrappers (pycpp/)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
-# Python module
-pybind11_add_module(numpycpp ${SOURCES})
-
-target_include_directories(numpycpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(numpycpp PRIVATE Eigen3::Eigen)
-
-set_target_properties(numpycpp PROPERTIES
-    PREFIX ""
-    SUFFIX ".so"
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-# Install
-install(TARGETS numpycpp
-    LIBRARY DESTINATION ${Python3_SITEARCH}
-)
-
+# ---- Install — header-only C++ library --------------------------------------
 install(DIRECTORY numpy/
     DESTINATION include/numpycpp
     FILES_MATCHING PATTERN "*.h"
 )
 
-message(STATUS "numpycpp v${PROJECT_VERSION}")
+# ---- CPack DEB packaging ----------------------------------------------------
+set(CPACK_PACKAGE_NAME                     "numpycpp-dev")
+set(CPACK_PACKAGE_VERSION                  ${PROJECT_VERSION})
+set(CPACK_PACKAGE_VENDOR                   "miaobyte")
+set(CPACK_PACKAGE_CONTACT                  "miaobyte")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY      "C++ pixel-level alignment of Python numpy — header-only library")
+set(CPACK_GENERATOR                        "DEB")
+set(CPACK_DEB_COMPONENT_INSTALL            OFF)
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER        "miaobyte")
+set(CPACK_DEBIAN_PACKAGE_SECTION           "libdevel")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY          "optional")
+set(CPACK_DEBIAN_FILE_NAME                 "numpycpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb")
+set(CPACK_PACKAGING_INSTALL_PREFIX         "/usr")
+
+include(CPack)
+
+# Convenience target
+add_custom_target(deb
+    COMMAND cpack -G DEB
+    COMMENT "Packaging numpcpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb"
+)
+
+message(STATUS "numpycpp v${PROJECT_VERSION}  (header-only C++ library)")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "  Python:       ${Python3_VERSION}")
-message(STATUS "  Eigen3:       ${EIGEN3_INCLUDE_DIR}")
+message(STATUS "  DEB:  make deb  →  numpcpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb")
+message(STATUS "  Test: cd tests/ && make  →  build + run 336 tests")
