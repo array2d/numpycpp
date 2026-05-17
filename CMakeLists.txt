@@ -44,6 +44,14 @@ install(FILES
     DESTINATION lib/cmake/numpycpp
 )
 
+# ---- Docs & examples -------------------------------------------------------
+install(FILES README.md
+    DESTINATION share/numpycpp
+)
+install(DIRECTORY example/
+    DESTINATION share/numpycpp/example
+)
+
 # ---- CPack DEB packaging ----------------------------------------------------
 set(CPACK_PACKAGE_NAME                     "numpycpp-dev")
 set(CPACK_PACKAGE_VERSION                  ${PROJECT_VERSION})
