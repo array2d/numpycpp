@@ -3,12 +3,19 @@
 # Manually create the imported target (no auto-generated targets file).
 # This avoids cmake_policy(PUSH/POP) scope issues present in CMake's
 # install(EXPORT)-generated targets files on CMake >= 3.20.
-add_library(numpycpp::numpycpp INTERFACE IMPORTED)
+#
+# Use a non-namespaced INTERFACE IMPORTED target as the real target,
+# plus a namespaced ALIAS for conventional CMake usage.  pybind11_add_module
+# has a CMake-level bug with namespaced (::) targets during generation,
+# so users hitting that can link against the bare "numpycpp" target instead.
+add_library(numpycpp INTERFACE IMPORTED)
 
-set_target_properties(numpycpp::numpycpp PROPERTIES
+set_target_properties(numpycpp PROPERTIES
     IMPORTED_GLOBAL TRUE
     INTERFACE_COMPILE_FEATURES "cxx_std_17"
     INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include/numpycpp"
 )
+
+add_library(numpycpp::numpycpp ALIAS numpycpp)
 
 check_required_components(numpycpp)
