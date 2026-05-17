@@ -19,6 +19,11 @@ install(DIRECTORY numpy
     DESTINATION include/numpycpp
     FILES_MATCHING PATTERN "*.h"
 )
+install(DIRECTORY pycpp
+    DESTINATION include/numpycpp
+    FILES_MATCHING PATTERN "*.h"
+    PATTERN ".pytest_cache" EXCLUDE
+)
 
 install(TARGETS numpycpp
     EXPORT numpycpp-targets
