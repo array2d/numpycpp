@@ -34,6 +34,26 @@ make -j$(nproc)
 import numpcpp
 ```
 
+### Testing
+
+The test suite verifies that every C++ function produces **pixel-level identical** results to Python numpy.
+
+```bash
+# Install test dependencies
+pip install numpy pytest
+
+# Run all precision alignment tests
+pytest tests/ -v
+
+# Custom tolerances
+pytest tests/ --rtol=1e-10 --atol=1e-10
+
+# Custom C++ module name
+pytest tests/ --cpp-module=my_numpycpp_module
+```
+
+All tests pass only when C++ output matches Python numpy output within the specified tolerance (default: `rtol=1e-12, atol=1e-12`).
+
 ## Project Structure
 
 ```
