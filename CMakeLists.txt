@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(numpycpp VERSION 1.21.2 LANGUAGES CXX)
+project(numpycpp VERSION 1.21.3 LANGUAGES CXX)
 
 # C++17
 set(CMAKE_CXX_STANDARD 17)
@@ -37,12 +37,20 @@ configure_package_config_file(
     INSTALL_DESTINATION lib/cmake/numpycpp
 )
 
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/numpycpp-config-version.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
 install(EXPORT numpycpp-targets
     NAMESPACE numpycpp::
     DESTINATION lib/cmake/numpycpp
 )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/numpycpp-config.cmake
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/numpycpp-config.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/numpycpp-config-version.cmake
     DESTINATION lib/cmake/numpycpp
 )
 
