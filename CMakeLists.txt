@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(numpycpp VERSION 1.21.3 LANGUAGES CXX)
+project(numpycpp VERSION 1.21.2 LANGUAGES CXX)
 
 # C++17
 set(CMAKE_CXX_STANDARD 17)
