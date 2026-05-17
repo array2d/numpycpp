@@ -1,5 +1,5 @@
 """
-Pytest fixtures and hooks for numpcpp precision alignment tests.
+Pytest fixtures and hooks for numpycpp precision alignment tests.
 
 Usage:
   pytest tests/                          # run all tests
@@ -14,7 +14,7 @@ import pytest
 def pytest_addoption(parser):
     parser.addoption(
         "--cpp-module", action="store", default=None,
-        help="Python module name for the compiled C++ numpcpp library (default: numpcpp)",
+        help="Python module name for the compiled C++ numpycpp library (default: numpycpp)",
     )
     parser.addoption(
         "--rtol", action="store", type=float, default=1e-12,
@@ -44,7 +44,7 @@ def _resolve_module_name(config) -> str:
 
 
 def get_cpp_module(request=None):
-    """Return the compiled numpcpp C++ module (lazy, cached)."""
+    """Return the compiled numpycpp C++ module (lazy, cached)."""
     global _cpp_module, _import_error
 
     if _cpp_module is not None:

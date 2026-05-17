@@ -1,4 +1,4 @@
-# Contributing to numpcpp
+# Contributing to numpycpp
 
 Thanks for your interest in contributing!
 

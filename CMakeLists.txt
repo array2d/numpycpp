@@ -65,10 +65,10 @@ include(CPack)
 # Convenience target
 add_custom_target(deb
     COMMAND cpack -G DEB
-    COMMENT "Packaging numpcpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb"
+    COMMENT "Packaging numpycpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb"
 )
 
 message(STATUS "numpycpp v${PROJECT_VERSION}  (header-only C++ library)")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "  DEB:  make deb  →  numpcpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb")
+message(STATUS "  DEB:  make deb  →  numpycpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb")
 message(STATUS "  Test: cd tests/ && make  →  build + run 336 tests")

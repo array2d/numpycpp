@@ -1,4 +1,4 @@
-// pybind11 module definition for numpcpp.
+// pybind11 module definition for numpycpp.
 // Registers double + float32 overloads for every template function.
 // All bindings use static_cast to disambiguate wrapper from native overloads in numpy::.
 

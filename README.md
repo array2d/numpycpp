@@ -1,4 +1,4 @@
-# numpcpp
+# numpycpp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
@@ -46,7 +46,7 @@ Download the [latest `.deb` release](https://github.com/array2d/numpycpp/release
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make deb
-sudo dpkg -i numpcpp-dev-*.deb
+sudo dpkg -i numpycpp-dev-*.deb
 ```
 
 Headers are installed to `/usr/include/numpycpp/` along with CMake config. Consuming projects use:

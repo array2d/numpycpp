@@ -1,4 +1,4 @@
-"""Reference numpy benchmarks for comparison with numpcpp bench_core.
+"""Reference numpy benchmarks for comparison with numpycpp bench_core.
 
 Usage: python bench_numpy.py
 """

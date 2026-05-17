@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug in numpcpp
+about: Report a bug in numpycpp
 title: "[Bug] "
 labels: bug
 assignees: ""
