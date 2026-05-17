@@ -1,4 +1,15 @@
 @PACKAGE_INIT@
-include("${CMAKE_CURRENT_LIST_DIR}/numpycpp-targets.cmake")
-set_target_properties(numpycpp::numpycpp PROPERTIES IMPORTED_GLOBAL TRUE)
+
+# Manually create the imported target (no auto-generated targets file).
+# This avoids cmake_policy(PUSH/POP) scope issues present in CMake's
+# install(EXPORT)-generated targets files on CMake >= 3.20.
+add_library(numpycpp::numpycpp INTERFACE IMPORTED GLOBAL)
+
+set_and_check(_numpycpp_include_dir "${PACKAGE_PREFIX_DIR}/include/numpycpp")
+
+set_target_properties(numpycpp::numpycpp PROPERTIES
+    INTERFACE_COMPILE_FEATURES "cxx_std_17"
+    INTERFACE_INCLUDE_DIRECTORIES "${_numpycpp_include_dir}"
+)
+
 check_required_components(numpycpp)

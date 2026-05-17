@@ -25,11 +25,6 @@ install(DIRECTORY pycpp
     PATTERN ".pytest_cache" EXCLUDE
 )
 
-install(TARGETS numpycpp
-    EXPORT numpycpp-targets
-    DESTINATION lib/cmake/numpycpp
-)
-
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
     numpycpp-config.cmake.in
@@ -41,11 +36,6 @@ write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/numpycpp-config-version.cmake
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
-)
-
-install(EXPORT numpycpp-targets
-    NAMESPACE numpycpp::
-    DESTINATION lib/cmake/numpycpp
 )
 
 install(FILES
