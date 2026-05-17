@@ -83,6 +83,10 @@ inline std::string implicit_output_labels(const std::vector<std::string>& il) {
 // ============================================================================
 // Main einsum computation
 // ============================================================================
+
+/// numpy.einsum(subscripts, *operands, out=None, dtype=None, order='K',
+///              casting='safe', optimize=False)
+//  Currently supports 2-operand patterns only.
 template<typename T>
 void einsum(const std::string& subscripts,
             const T* a_ptr, const ptrdiff_t* a_shape, int a_ndim,
@@ -233,7 +237,7 @@ void einsum(const std::string& subscripts,
         result_ptr[current_output_idx] = accumulator;
 }
 
-// Helper: compute output shape for a given einsum pattern
+/// numpy.einsum(subscripts, *operands) — compute output shape
 inline std::vector<ptrdiff_t> einsum_output_shape(const std::string& subscripts,
                                                     const ptrdiff_t* a_shape, int a_ndim,
                                                     const ptrdiff_t* b_shape, int b_ndim) {

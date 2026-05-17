@@ -31,17 +31,17 @@ class TestNorm:
         assert np.allclose(cpp_r, 0.0, _rtol, _atol)
 
 
-class TestNormAxis1:
+class TestNormAxis:
     def test_2d(self, cpp, rtol, atol, dtype):
         _rtol, _atol = tolerance_for(dtype, rtol, atol)
         a = random_array((5, 4), dtype=dtype)
-        info = compare(cpp.linalg.norm_axis1(a), np.linalg.norm(a, axis=1), _rtol, _atol, "norm axis=1")
+        info = compare(cpp.linalg.norm(a, axis=1), np.linalg.norm(a, axis=1), _rtol, _atol, "norm axis=1")
         assert info["pass"], info.get("error")
 
     def test_1d_fallback(self, cpp, rtol, atol, dtype):
         _rtol, _atol = tolerance_for(dtype, rtol, atol)
         a = np.array([3.0, 4.0], dtype=dtype)  # norm = 5.0
-        cpp_r = np.asarray(cpp.linalg.norm_axis1(a)).item()
+        cpp_r = np.asarray(cpp.linalg.norm(a)).item()
         py_r = np.linalg.norm(a)
         assert np.allclose(cpp_r, py_r, _rtol, _atol)
 

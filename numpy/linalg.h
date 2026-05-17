@@ -1,5 +1,5 @@
 // Native C++ linalg functions — zero pybind11 dependency.
-// Uses numpy::impl:: helpers from core.h for shared computation.
+// Uses numpy:: helpers from core.h for shared computation.
 
 #pragma once
 
@@ -9,14 +9,16 @@
 namespace numpy {
 namespace linalg {
 
+/// numpy.linalg.norm(x, ord=None, axis=None, keepdims=False) — frobenius/vector
 template<typename T>
 inline T norm(const T* data, size_t n) {
     return std::sqrt(numpy::norm_sq(data, n));
 }
 
+/// numpy.linalg.norm(x, ord=None, axis=N, keepdims=False) — N-D
 template<typename T>
-inline void norm_axis1(const T* src, double* dst, size_t rows, size_t cols) {
-    numpy::norm_axis1(src, dst, rows, cols);
+inline void norm_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndim, int axis) {
+    numpy::norm_axis(src, dst, shape, ndim, axis);
 }
 
 } // namespace linalg

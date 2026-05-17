@@ -11,6 +11,9 @@ namespace py = pybind11;
 
 namespace numpy {
 
+/// numpy.einsum(subscripts, *operands, out=None, dtype=None, order='K',
+///              casting='safe', optimize=False)
+//  Currently supports 2-operand patterns only.
 template<typename T>
 py::array_t<T> einsum(const std::string& subscripts,
                       const py::array_t<T>& a,

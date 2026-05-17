@@ -1,5 +1,8 @@
 // Pybind11 wrappers for core.h native functions.
 // Thin layer: extract pointers from py::array_t, call *, wrap results.
+//
+// Each wrapper matches a Python numpy API; native dispatch is handled
+// by the functions in numpy/core.h (q.v. for individual numpy annotations).
 
 #pragma once
 
@@ -14,8 +17,10 @@ namespace py = pybind11;
 namespace numpy {
 
 // ============================================================================
-// Array creation
+// Array creation — numpy.zeros_like, numpy.ones_like, numpy.full_like, etc.
 // ============================================================================
+
+/// numpy.zeros_like(a, dtype=None, order='K', subok=True, shape=None)
 template<typename T>
 py::array_t<T> zeros_like(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -24,6 +29,7 @@ py::array_t<T> zeros_like(const py::array_t<T>& arr) {
     return result;
 }
 
+/// numpy.ones_like(a, dtype=None, order='K', subok=True, shape=None)
 template<typename T>
 py::array_t<T> ones_like(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -32,6 +38,7 @@ py::array_t<T> ones_like(const py::array_t<T>& arr) {
     return result;
 }
 
+/// numpy.full_like(a, fill_value, dtype=None, order='K', subok=True, shape=None)
 template<typename T>
 py::array_t<T> full_like(const py::array_t<T>& arr, T fill_value) {
     auto buf = arr.request();
@@ -40,17 +47,20 @@ py::array_t<T> full_like(const py::array_t<T>& arr, T fill_value) {
     return result;
 }
 
+/// numpy.empty_like(prototype, dtype=None, order='K', subok=True, shape=None)
 template<typename T>
 py::array_t<T> empty_like(const py::array_t<T>& arr) {
     return py::array_t<T>(arr.request().shape);
 }
 
+/// numpy.zeros(shape, dtype=float, order='C', *, like=None)
 inline py::array_t<double> zeros(const std::vector<py::ssize_t>& shape) {
     py::array_t<double> result(shape);
     zeros_like(static_cast<double*>(result.request().ptr), result.request().size);
     return result;
 }
 
+/// numpy.ones(shape, dtype=float, order='C', *, like=None)
 inline py::array_t<double> ones(const std::vector<py::ssize_t>& shape) {
     py::array_t<double> result(shape);
     ones_like(static_cast<double*>(result.request().ptr), result.request().size);
@@ -58,6 +68,8 @@ inline py::array_t<double> ones(const std::vector<py::ssize_t>& shape) {
 }
 
 // Bool specializations
+// NOTE: _bool suffix — dtype-specific wrappers; pybind11 cannot deduce template
+// argument from a Python dtype keyword, so each dtype needs its own binding.
 inline py::array_t<bool> full_like_bool(const py::array_t<double>& arr, bool fill_value) {
     auto buf = arr.request();
     py::array_t<bool> result(buf.shape);
@@ -80,32 +92,41 @@ inline py::array_t<bool> ones_like_bool(const py::array_t<double>& arr) {
 }
 
 // ============================================================================
-// astype
+// astype — ndarray.astype(dtype, order='K', casting='unsafe', subok=True, copy=True)
+//
+// NOTE: wrappers use distinct names (astype_int, astype_bool, astype_bool_from_int)
+// instead of a single "astype" because pybind11 cannot resolve overloads that differ
+// only by return type. Each (Tout, Tin) combination needs its own Python binding.
 // ============================================================================
+
+/// ndarray.astype(int) — float64 → int
 inline py::array_t<int> astype_int(const py::array_t<double>& arr) {
     auto buf = arr.request();
     py::array_t<int> result(buf.shape);
-    astype_int(static_cast<const double*>(buf.ptr),
-                     static_cast<int*>(result.request().ptr), buf.size);
+    astype<int, double>(static_cast<const double*>(buf.ptr),
+                        static_cast<int*>(result.request().ptr), buf.size);
     return result;
 }
 
+/// ndarray.astype(bool) — float64 → bool
 inline py::array_t<bool> astype_bool(const py::array_t<double>& arr) {
     auto buf = arr.request();
     py::array_t<bool> result(buf.shape);
-    astype_bool(static_cast<const double*>(buf.ptr),
+    astype<bool, double>(static_cast<const double*>(buf.ptr),
+                         static_cast<bool*>(result.request().ptr), buf.size);
+    return result;
+}
+
+/// ndarray.astype(bool) — int → bool
+inline py::array_t<bool> astype_bool_from_int(const py::array_t<int>& arr) {
+    auto buf = arr.request();
+    py::array_t<bool> result(buf.shape);
+    astype<bool, int>(static_cast<const int*>(buf.ptr),
                       static_cast<bool*>(result.request().ptr), buf.size);
     return result;
 }
 
-inline py::array_t<bool> astype_bool_from_int(const py::array_t<int>& arr) {
-    auto buf = arr.request();
-    py::array_t<bool> result(buf.shape);
-    astype_bool_from_int(static_cast<const int*>(buf.ptr),
-                                static_cast<bool*>(result.request().ptr), buf.size);
-    return result;
-}
-
+/// float64 → float32 → float64 roundtrip (precision testing helper)
 inline py::array_t<double> truncate_to_float32(const py::array_t<double>& arr) {
     auto buf = arr.request();
     py::array_t<double> result(buf.shape);
@@ -115,7 +136,7 @@ inline py::array_t<double> truncate_to_float32(const py::array_t<double>& arr) {
 }
 
 // ============================================================================
-// Element-wise math
+// Element-wise math — numpy.sqrt, abs, exp, log, sin, cos, tan, ...
 // ============================================================================
 #define DEF_ELEMWISE(name) \
 template<typename T> \
@@ -127,27 +148,46 @@ py::array_t<T> name(const py::array_t<T>& arr) { \
     return result; \
 }
 
+/// numpy.sqrt(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(sqrt)
+/// numpy.abs(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(abs)
+/// numpy.exp(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(exp)
+/// numpy.log(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(log)
+/// numpy.sin(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(sin)
+/// numpy.cos(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(cos)
+/// numpy.tan(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(tan)
+/// numpy.log10(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(log10)
+/// numpy.log2(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(log2)
+/// numpy.arcsin(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(arcsin)
+/// numpy.arccos(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(arccos)
+/// numpy.arctan(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(arctan)
+/// numpy.round(a, decimals=0, out=None)
 DEF_ELEMWISE(round)
+/// numpy.floor(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(floor)
+/// numpy.ceil(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(ceil)
+/// numpy.degrees(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(degrees)
+/// numpy.radians(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(radians)
+/// numpy.sign(x, /, out=None, *, where=True, ...)
 DEF_ELEMWISE(sign)
 
 #undef DEF_ELEMWISE
 
+/// numpy.power(x1, x2, /, out=None, *, where=True, ...) — scalar exponent only
 template<typename T>
 py::array_t<T> power(const py::array_t<T>& arr, T exponent) {
     auto buf = arr.request();
@@ -157,6 +197,7 @@ py::array_t<T> power(const py::array_t<T>& arr, T exponent) {
     return result;
 }
 
+/// numpy.clip(a, a_min, a_max, out=None, **kwargs)
 template<typename T>
 py::array_t<T> clip(const py::array_t<T>& arr, T min_val, T max_val) {
     auto buf = arr.request();
@@ -167,14 +208,17 @@ py::array_t<T> clip(const py::array_t<T>& arr, T min_val, T max_val) {
 }
 
 // ============================================================================
-// Reduction
+// Reduction — numpy.sum, mean, max, min, any, all, std, var
 // ============================================================================
+
+/// numpy.sum(a, axis=None, dtype=None, out=None, keepdims=False, ...)
 template<typename T>
 T sum(const py::array_t<T>& arr) {
     auto buf = arr.request();
     return sum(static_cast<const T*>(buf.ptr), buf.size);
 }
 
+/// numpy.mean(a, axis=None, dtype=None, out=None, keepdims=False, *)
 template<typename T>
 T mean(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -182,34 +226,40 @@ T mean(const py::array_t<T>& arr) {
     return mean(static_cast<const T*>(buf.ptr), buf.size);
 }
 
+/// numpy.max(a, axis=None, out=None, keepdims=False, initial=..., where=...)
 template<typename T>
 T max(const py::array_t<T>& arr) {
     auto buf = arr.request();
     return max(static_cast<const T*>(buf.ptr), buf.size);
 }
 
+/// numpy.min(a, axis=None, out=None, keepdims=False, initial=..., where=...)
 template<typename T>
 T min(const py::array_t<T>& arr) {
     auto buf = arr.request();
     return min(static_cast<const T*>(buf.ptr), buf.size);
 }
 
+/// numpy.any(a, axis=None, out=None, keepdims=False, *)
 inline bool any(const py::array_t<bool>& arr) {
     auto buf = arr.request();
     return any(static_cast<const bool*>(buf.ptr), buf.size);
 }
 
+/// numpy.all(a, axis=None, out=None, keepdims=False, *)
 inline bool all(const py::array_t<bool>& arr) {
     auto buf = arr.request();
     return all(static_cast<const bool*>(buf.ptr), buf.size);
 }
 
+/// numpy.std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *)
 template<typename T>
 T std(const py::array_t<T>& arr) {
     auto buf = arr.request();
     return stddev(static_cast<const T*>(buf.ptr), buf.size);
 }
 
+/// numpy.var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *)
 template<typename T>
 T var(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -217,7 +267,7 @@ T var(const py::array_t<T>& arr) {
 }
 
 // ============================================================================
-// Comparison
+// Comparison — numpy.greater, less, equal, greater_equal, less_equal, not_equal
 // ============================================================================
 #define DEF_COMPARE(name) \
 template<typename T> \
@@ -229,14 +279,20 @@ py::array_t<bool> name(const py::array_t<T>& a, T b) { \
     return result; \
 }
 
+/// numpy.greater(x1, x2, /, out=None, *, where=True, ...)
 DEF_COMPARE(greater)
+/// numpy.less(x1, x2, /, out=None, *, where=True, ...)
 DEF_COMPARE(less)
+/// numpy.equal(x1, x2, /, out=None, *, where=True, ...)
 DEF_COMPARE(equal)
+/// numpy.greater_equal(x1, x2, /, out=None, *, where=True, ...)
 DEF_COMPARE(greater_equal)
+/// numpy.less_equal(x1, x2, /, out=None, *, where=True, ...)
 DEF_COMPARE(less_equal)
 
 #undef DEF_COMPARE
 
+/// numpy.not_equal(x1, x2, /, out=None, *, where=True, ...) — scalar
 template<typename T>
 py::array_t<bool> not_equal(const py::array_t<T>& a, T b) {
     auto buf = a.request();
@@ -246,6 +302,7 @@ py::array_t<bool> not_equal(const py::array_t<T>& a, T b) {
     return result;
 }
 
+/// numpy.not_equal(x1, x2, /, out=None, *, where=True, ...) — array
 template<typename T>
 py::array_t<bool> not_equal(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();
@@ -258,8 +315,10 @@ py::array_t<bool> not_equal(const py::array_t<T>& a, const py::array_t<T>& b) {
 }
 
 // ============================================================================
-// Logical
+// Logical — numpy.logical_and, logical_or, logical_not, logical_xor
 // ============================================================================
+
+/// numpy.logical_and(x1, x2, /, out=None, *, where=True, ...)
 inline py::array_t<bool> logical_and(const py::array_t<bool>& a, const py::array_t<bool>& b) {
     auto ba = a.request(), bb = b.request();
     py::array_t<bool> result(ba.shape);
@@ -270,6 +329,7 @@ inline py::array_t<bool> logical_and(const py::array_t<bool>& a, const py::array
     return result;
 }
 
+/// numpy.logical_or(x1, x2, /, out=None, *, where=True, ...)
 inline py::array_t<bool> logical_or(const py::array_t<bool>& a, const py::array_t<bool>& b) {
     auto ba = a.request(), bb = b.request();
     py::array_t<bool> result(ba.shape);
@@ -280,6 +340,7 @@ inline py::array_t<bool> logical_or(const py::array_t<bool>& a, const py::array_
     return result;
 }
 
+/// numpy.logical_not(x, /, out=None, *, where=True, ...)
 inline py::array_t<bool> logical_not(const py::array_t<bool>& a) {
     auto buf = a.request();
     py::array_t<bool> result(buf.shape);
@@ -288,6 +349,7 @@ inline py::array_t<bool> logical_not(const py::array_t<bool>& a) {
     return result;
 }
 
+/// numpy.logical_xor(x1, x2, /, out=None, *, where=True, ...)
 inline py::array_t<bool> logical_xor(const py::array_t<bool>& a, const py::array_t<bool>& b) {
     auto ba = a.request(), bb = b.request();
     py::array_t<bool> result(ba.shape);
@@ -299,7 +361,7 @@ inline py::array_t<bool> logical_xor(const py::array_t<bool>& a, const py::array
 }
 
 // ============================================================================
-// Special value helpers
+// Special value helpers — numpy.isnan, isinf, isfinite
 // ============================================================================
 #define DEF_SPECIAL(name) \
 template<typename T> \
@@ -311,15 +373,20 @@ py::array_t<bool> name(const py::array_t<T>& arr) { \
     return result; \
 }
 
+/// numpy.isnan(x, /, out=None, *, where=True, ...)
 DEF_SPECIAL(isnan)
+/// numpy.isinf(x, /, out=None, *, where=True, ...)
 DEF_SPECIAL(isinf)
+/// numpy.isfinite(x, /, out=None, *, where=True, ...)
 DEF_SPECIAL(isfinite)
 
 #undef DEF_SPECIAL
 
 // ============================================================================
-// Array access
+// Array access — ndarray indexing
 // ============================================================================
+
+/// ndarray[idx] — 1D get
 inline double array_get(const py::array_t<double>& arr, py::ssize_t idx) {
     auto buf = arr.request();
     if (idx < 0) idx = buf.size + idx;
@@ -327,6 +394,7 @@ inline double array_get(const py::array_t<double>& arr, py::ssize_t idx) {
         ? static_cast<const double*>(buf.ptr)[idx] : 0.0;
 }
 
+/// ndarray[i, j] — 2D get
 inline double array_get(const py::array_t<double>& arr, py::ssize_t i, py::ssize_t j) {
     auto buf = arr.request();
     if (buf.ndim != 2) return 0.0;
@@ -359,42 +427,50 @@ inline void set_array(py::dict& d, const char* key, const py::array_t<double>& a
 }
 
 // ============================================================================
-// Conversion
+// Conversion — numpy.asarray, numpy.array
 // ============================================================================
+
+/// numpy.asarray(a, dtype=None, order=None, *, like=None)
 inline py::array_t<double> asarray(const std::vector<double>& vec) {
     return py::array_t<double>(vec.size(), vec.data());
 }
 inline py::array_t<double> asarray(const py::array_t<double>& arr) { return arr; }
+
+/// numpy.array(object, dtype=None, *, copy=True, order='K', subok=False, ndmin=0, like=None)
 inline py::array_t<double> array(const std::vector<double>& vec) {
     return py::array_t<double>(vec.size(), vec.data());
 }
 inline py::array_t<double> array(const py::array_t<double>& arr) { return arr; }
 
 // ============================================================================
-// transpose / flatten
+// numpy.transpose / ndarray.flatten
 // ============================================================================
+
+/// numpy.transpose(a, axes=None) — N-D, defaults to reversing all axes
 template<typename T>
 py::array_t<T> transpose(const py::array_t<T>& arr) {
     auto buf = arr.request();
-    if (buf.ndim == 1) {
-        py::array_t<T> result(buf.shape);
-        std::memcpy(static_cast<T*>(result.request().ptr),
-                    static_cast<const T*>(buf.ptr), buf.size * sizeof(T));
-        return result;
+    std::vector<ptrdiff_t> shape(buf.shape.begin(), buf.shape.end());
+    int ndim = static_cast<int>(buf.ndim);
+
+    // Build default permutation: reverse all axes
+    std::vector<int> axes(ndim);
+    for (int i = 0; i < ndim; ++i) axes[i] = ndim - 1 - i;
+
+    // Output shape
+    std::vector<py::ssize_t> out_shape(ndim);
+    for (int i = 0; i < ndim; ++i) out_shape[i] = buf.shape[axes[i]];
+
+    py::array_t<T> result(out_shape);
+    if (ndim > 0) {
+        transpose(static_cast<const T*>(buf.ptr),
+                         static_cast<T*>(result.request().ptr),
+                         shape.data(), ndim, axes.data());
     }
-    if (buf.ndim == 2) {
-        py::array_t<T> result({buf.shape[1], buf.shape[0]});
-        transpose_2d(static_cast<const T*>(buf.ptr),
-                            static_cast<T*>(result.request().ptr),
-                            buf.shape[0], buf.shape[1]);
-        return result;
-    }
-    py::array_t<T> result({buf.size});
-    std::memcpy(static_cast<T*>(result.request().ptr),
-                static_cast<const T*>(buf.ptr), buf.size * sizeof(T));
     return result;
 }
 
+/// ndarray.flatten(order='C')
 template<typename T>
 py::array_t<T> flatten(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -405,71 +481,40 @@ py::array_t<T> flatten(const py::array_t<T>& arr) {
 }
 
 // ============================================================================
-// mean with axis
+// numpy.mean / ndarray.mean with axis
 // ============================================================================
+
+/// numpy.mean(a, axis=..., dtype=None, out=None, keepdims=False, *) — N-D
 template<typename T>
 py::array_t<double> mean_axis(const py::array_t<T>& arr, int axis) {
     auto buf = arr.request();
-    if (buf.ndim < 1 || buf.ndim > 3)
-        throw std::invalid_argument("Array must be 1D, 2D, or 3D");
+    if (buf.ndim < 1) throw std::invalid_argument("Array must have at least 1 dimension");
 
     int ax = (axis == -1) ? static_cast<int>(buf.ndim - 1) : axis;
 
-    if (buf.ndim == 1) {
-        if (ax != 0) throw std::invalid_argument("For 1D array, axis must be 0 or -1");
-        py::array_t<double> result({1});
-        *static_cast<double*>(result.request().ptr) =
-            static_cast<double>(mean(arr));
-        return result;
-    }
+    std::vector<ptrdiff_t> shape(buf.shape.begin(), buf.shape.end());
 
-    if (buf.ndim == 2) {
-        py::ssize_t rows = buf.shape[0], cols = buf.shape[1];
-        const T* src = static_cast<const T*>(buf.ptr);
-        if (ax == 0) {
-            py::array_t<double> result({cols});
-            mean_axis0_2d(src, static_cast<double*>(result.request().ptr),
-                                 rows, cols);
-            return result;
-        }
-        if (ax == 1) {
-            py::array_t<double> result({rows});
-            mean_axis1_2d(src, static_cast<double*>(result.request().ptr),
-                                 rows, cols);
-            return result;
-        }
-        throw std::invalid_argument("For 2D array, axis must be 0, 1, or -1");
-    }
+    // Output shape: drop the reduced axis
+    std::vector<ptrdiff_t> out_shape;
+    for (int d = 0; d < buf.ndim; ++d)
+        if (d != ax) out_shape.push_back(shape[d]);
+    if (out_shape.empty()) out_shape.push_back(1);
 
-    // ndim == 3
-    py::ssize_t d0 = buf.shape[0], d1 = buf.shape[1], d2 = buf.shape[2];
-    const T* src = static_cast<const T*>(buf.ptr);
-    if (ax == 0) {
-        py::array_t<double> result({d1, d2});
-        mean_axis0_3d(src, static_cast<double*>(result.request().ptr),
-                              d0, d1, d2);
-        return result;
-    }
-    if (ax == 1) {
-        py::array_t<double> result({d0, d2});
-        mean_axis1_3d(src, static_cast<double*>(result.request().ptr),
-                              d0, d1, d2);
-        return result;
-    }
-    if (ax == 2) {
-        py::array_t<double> result({d0, d1});
-        mean_axis2_3d(src, static_cast<double*>(result.request().ptr),
-                              d0, d1, d2);
-        return result;
-    }
-    throw std::invalid_argument("For 3D array, axis must be 0, 1, 2, or -1");
+    std::vector<py::ssize_t> py_out_shape(out_shape.begin(), out_shape.end());
+    py::array_t<double> result(py_out_shape);
+    mean_axis(static_cast<const T*>(buf.ptr),
+                     static_cast<double*>(result.request().ptr),
+                     shape.data(), static_cast<int>(buf.ndim), ax);
+    return result;
 }
 
+/// numpy.mean(a, axis=..., ...) — float64
 inline py::array_t<double> mean(const py::array_t<double>& arr, int axis) { return mean_axis(arr, axis); }
+/// numpy.mean(a, axis=..., ...) — float32
 inline py::array_t<double> mean(const py::array_t<float>& arr, int axis)  { return mean_axis(arr, axis); }
 
 // ============================================================================
-// to_vector
+// to_vector — utility
 // ============================================================================
 inline std::vector<bool> to_vector(const py::array_t<bool>& arr) {
     auto buf = arr.request();
@@ -485,8 +530,10 @@ std::vector<T> to_vector(const py::array_t<T>& arr) {
 }
 
 // ============================================================================
-// Slice helpers
+// Slice helpers — ndarray[start:stop]
 // ============================================================================
+
+/// ndarray[start:stop] — typed
 template<typename T>
 py::array_t<T> slice(const py::array_t<T>& arr, py::ssize_t start, py::ssize_t stop) {
     auto buf = arr.request();
@@ -511,6 +558,7 @@ py::array_t<T> slice(const py::array_t<T>& arr, py::ssize_t start, py::ssize_t s
     return result;
 }
 
+/// ndarray[start:stop] — generic (preserves dtype)
 inline py::array slice(const py::array& arr, py::ssize_t start, py::ssize_t stop) {
     auto buf = arr.request();
     if (buf.ndim < 1) return py::array{};
@@ -534,8 +582,12 @@ inline py::array slice(const py::array& arr, py::ssize_t start, py::ssize_t stop
 }
 
 // ============================================================================
-// Column slice
+// numpy.take(a, indices, axis=1) — extract first N columns
 // ============================================================================
+
+/// numpy.take(a, indices, axis=1) — specialized subset: first N columns, 2D only.
+//  NOTE: named take_cols, not take — numpy.take supports arbitrary indices and
+//  arbitrary axis; this is a narrow helper with a simpler (arr, n) signature.
 template<typename T>
 py::array_t<T> take_cols(const py::array_t<T>& arr, py::ssize_t n) {
     auto buf = arr.request();
@@ -551,8 +603,10 @@ py::array_t<T> take_cols(const py::array_t<T>& arr, py::ssize_t n) {
 }
 
 // ============================================================================
-// Slice assignment
+// Slice assignment — a[start:] = value
 // ============================================================================
+
+/// a[start:] = value (in-place)
 template<typename T>
 void slice_assign(py::array_t<T> arr, py::ssize_t start, T value) {
     auto buf = arr.request();
@@ -579,8 +633,10 @@ inline void slice_assign(py::array_t<bool> arr, py::ssize_t start, bool value) {
 }
 
 // ============================================================================
-// Binary element-wise: array-array and array-scalar
+// Binary element-wise — numpy.arctan2, maximum, minimum
 // ============================================================================
+
+/// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 py::array_t<T> arctan2(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();
@@ -592,6 +648,7 @@ py::array_t<T> arctan2(const py::array_t<T>& a, const py::array_t<T>& b) {
     return result;
 }
 
+/// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-scalar
 template<typename T>
 py::array_t<T> arctan2(const py::array_t<T>& a, T b) {
     auto buf = a.request();
@@ -601,6 +658,7 @@ py::array_t<T> arctan2(const py::array_t<T>& a, T b) {
     return result;
 }
 
+/// numpy.maximum(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 py::array_t<T> maximum(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();
@@ -612,6 +670,7 @@ py::array_t<T> maximum(const py::array_t<T>& a, const py::array_t<T>& b) {
     return result;
 }
 
+/// numpy.maximum(x1, x2, /, out=None, *, where=True, ...) — scalar
 template<typename T>
 py::array_t<T> maximum(const py::array_t<T>& a, T b) {
     auto buf = a.request();
@@ -621,6 +680,7 @@ py::array_t<T> maximum(const py::array_t<T>& a, T b) {
     return result;
 }
 
+/// numpy.minimum(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 py::array_t<T> minimum(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();
@@ -632,6 +692,7 @@ py::array_t<T> minimum(const py::array_t<T>& a, const py::array_t<T>& b) {
     return result;
 }
 
+/// numpy.minimum(x1, x2, /, out=None, *, where=True, ...) — scalar
 template<typename T>
 py::array_t<T> minimum(const py::array_t<T>& a, T b) {
     auto buf = a.request();
@@ -642,42 +703,33 @@ py::array_t<T> minimum(const py::array_t<T>& a, T b) {
 }
 
 // ============================================================================
-// Array manipulation: diff, stack, concatenate, etc.
+// Array manipulation — numpy.diff, stack, concatenate, where, roll, flip, ...
 // ============================================================================
+
+/// numpy.diff(a, n=1, axis=-1, prepend=..., append=...) — N-D
 template<typename T>
 py::array_t<T> diff(const py::array_t<T>& arr, int n = 1, int axis = -1) {
     auto buf = arr.request();
     if (buf.ndim == 0 || buf.size < 2) return py::array_t<T>{};
 
-    if (buf.ndim == 1) {
-        py::array_t<T> result({buf.size - 1});
-        diff_1d(static_cast<const T*>(buf.ptr),
-                       static_cast<T*>(result.request().ptr), buf.size);
-        return result;
-    }
+    int ax = (axis == -1) ? static_cast<int>(buf.ndim - 1) : axis;
+    if (ax < 0 || ax >= static_cast<int>(buf.ndim)) return py::array_t<T>{};
 
-    if (buf.ndim == 2) {
-        py::ssize_t rows = buf.shape[0], cols = buf.shape[1];
-        const T* src = static_cast<const T*>(buf.ptr);
-        int ax = (axis == -1) ? 1 : axis;
-        if (ax == 0) {
-            py::array_t<T> result({rows - 1, cols});
-            diff_2d_axis0(src, static_cast<T*>(result.request().ptr), rows, cols);
-            return result;
-        } else {
-            py::array_t<T> result({rows, cols - 1});
-            diff_2d_axis1(src, static_cast<T*>(result.request().ptr), rows, cols);
-            return result;
-        }
-    }
+    std::vector<ptrdiff_t> shape(buf.shape.begin(), buf.shape.end());
+    if (shape[ax] < 2) return py::array_t<T>{};
 
-    // fallback: flatten
-    py::array_t<T> result({buf.size - 1});
-    diff_1d(static_cast<const T*>(buf.ptr),
-                   static_cast<T*>(result.request().ptr), buf.size);
+    std::vector<ptrdiff_t> out_shape = shape;
+    out_shape[ax]--;
+    std::vector<py::ssize_t> py_out_shape(out_shape.begin(), out_shape.end());
+
+    py::array_t<T> result(py_out_shape);
+    diff(static_cast<const T*>(buf.ptr),
+                static_cast<T*>(result.request().ptr),
+                shape.data(), static_cast<int>(buf.ndim), ax);
     return result;
 }
 
+/// numpy.stack(arrays, axis=0, out=None, *, dtype=None, casting=...)
 template<typename T>
 py::array_t<T> stack(const std::vector<py::array_t<T>>& arrays) {
     if (arrays.empty()) return py::array_t<T>{};
@@ -692,6 +744,7 @@ py::array_t<T> stack(const std::vector<py::array_t<T>>& arrays) {
     return result;
 }
 
+/// numpy.concatenate((a1, a2, ...), axis=0, out=None, dtype=None, casting=...)
 template<typename T>
 py::array_t<T> concatenate(const std::vector<py::array_t<T>>& arrays) {
     if (arrays.empty()) return py::array_t<T>{};
@@ -708,12 +761,15 @@ py::array_t<T> concatenate(const std::vector<py::array_t<T>>& arrays) {
     return result;
 }
 
+/// numpy.vstack(tup, *, dtype=None, casting=...)
 template<typename T>
 py::array_t<T> vstack(const std::vector<py::array_t<T>>& arrays) { return stack(arrays); }
 
+/// numpy.hstack(tup, *, dtype=None, casting=...)
 template<typename T>
 py::array_t<T> hstack(const std::vector<py::array_t<T>>& arrays) { return concatenate(arrays); }
 
+/// numpy.where(condition, x, y) — scalar x, y
 template<typename T>
 py::array_t<T> where(const py::array_t<bool>& cond, T x, T y) {
     auto buf = cond.request();
@@ -723,6 +779,7 @@ py::array_t<T> where(const py::array_t<bool>& cond, T x, T y) {
     return result;
 }
 
+/// numpy.where(condition, x, y) — array x, y
 template<typename T>
 py::array_t<T> where(const py::array_t<bool>& cond, const py::array_t<T>& x, const py::array_t<T>& y) {
     auto bc = cond.request(), bx = x.request(), by = y.request();
@@ -735,6 +792,7 @@ py::array_t<T> where(const py::array_t<bool>& cond, const py::array_t<T>& x, con
     return result;
 }
 
+/// numpy.roll(a, shift, axis=None)
 template<typename T>
 py::array_t<T> roll(const py::array_t<T>& arr, py::ssize_t shift) {
     auto buf = arr.request();
@@ -745,6 +803,7 @@ py::array_t<T> roll(const py::array_t<T>& arr, py::ssize_t shift) {
     return result;
 }
 
+/// numpy.flip(m, axis=None)
 template<typename T>
 py::array_t<T> flip(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -754,6 +813,7 @@ py::array_t<T> flip(const py::array_t<T>& arr) {
     return result;
 }
 
+/// numpy.repeat(a, repeats, axis=None)
 template<typename T>
 py::array_t<T> repeat(const py::array_t<T>& arr, py::ssize_t repeats) {
     auto buf = arr.request();
@@ -763,6 +823,7 @@ py::array_t<T> repeat(const py::array_t<T>& arr, py::ssize_t repeats) {
     return result;
 }
 
+/// numpy.tile(A, reps)
 template<typename T>
 py::array_t<T> tile(const py::array_t<T>& arr, py::ssize_t reps) {
     auto buf = arr.request();
@@ -773,8 +834,10 @@ py::array_t<T> tile(const py::array_t<T>& arr, py::ssize_t reps) {
 }
 
 // ============================================================================
-// Sorting and indexing
+// Sorting and indexing — numpy.argsort, argmax, argmin
 // ============================================================================
+
+/// numpy.argsort(a, axis=-1, kind=None, order=None)
 template<typename T>
 py::array_t<py::ssize_t> argsort(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -783,6 +846,7 @@ py::array_t<py::ssize_t> argsort(const py::array_t<T>& arr) {
     return py::array_t<py::ssize_t>(buf.size, idx.data());
 }
 
+/// numpy.argmax(a, axis=None, out=None, *, keepdims=...)
 template<typename T>
 py::ssize_t argmax(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -790,6 +854,7 @@ py::ssize_t argmax(const py::array_t<T>& arr) {
         argmax(static_cast<const T*>(buf.ptr), buf.size));
 }
 
+/// numpy.argmin(a, axis=None, out=None, *, keepdims=...)
 template<typename T>
 py::ssize_t argmin(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -798,8 +863,10 @@ py::ssize_t argmin(const py::array_t<T>& arr) {
 }
 
 // ============================================================================
-// Set operations
+// Set operations — numpy.isin, numpy.intersect1d
 // ============================================================================
+
+/// numpy.isin(element, test_elements, assume_unique=False, invert=False)
 inline py::array_t<bool> isin(const py::array_t<double>& arr, const std::vector<double>& values) {
     auto buf = arr.request();
     py::array_t<bool> result(buf.shape);
@@ -809,6 +876,7 @@ inline py::array_t<bool> isin(const py::array_t<double>& arr, const std::vector<
     return result;
 }
 
+/// numpy.intersect1d(ar1, ar2, assume_unique=False, return_indices=False)
 inline py::array_t<double> intersect1d(const py::array_t<double>& a, const py::array_t<double>& b) {
     auto ba = a.request(), bb = b.request();
     auto inter = intersect1d(
@@ -818,8 +886,10 @@ inline py::array_t<double> intersect1d(const py::array_t<double>& a, const py::a
 }
 
 // ============================================================================
-// Interpolation
+// Interpolation — numpy.interp
 // ============================================================================
+
+/// numpy.interp(x, xp, fp, left=None, right=None, period=None)
 inline py::array_t<double> interp(const py::array_t<double>& x,
                                    const py::array_t<double>& xp,
                                    const py::array_t<double>& fp) {

@@ -46,13 +46,15 @@ PYBIND11_MODULE(numpycpp, m) {
     py::module_ la = m.def_submodule("linalg", "numpy.linalg equivalents");
     la.def("norm", static_cast<double(*)(const py::array_t<double>&)>(&numpy::linalg::norm));
     la.def("norm", static_cast<float(*)(const py::array_t<float>&)>(&numpy::linalg::norm));
-    la.def("norm_axis1", static_cast<py::array_t<double>(*)(const py::array_t<double>&)>(&numpy::linalg::norm_axis1));
-    la.def("norm_axis1", static_cast<py::array_t<double>(*)(const py::array_t<float>&)>(&numpy::linalg::norm_axis1));
+    la.def("norm", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
+    la.def("norm", static_cast<py::array_t<double>(*)(const py::array_t<float>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
 
     // -- Array creation ----------------------------------------------------
     BIND_F1(zeros_like); BIND_F1(ones_like); BIND_F1(empty_like);
     m.def("full_like", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double)>(&numpy::full_like));
     m.def("full_like", static_cast<py::array_t<float>(*)(const py::array_t<float>&, float)>(&numpy::full_like));
+    // NOTE: _bool suffix — dtype-specific wrappers needed because pybind11
+    // cannot deduce template argument from a Python dtype keyword.
     m.def("full_like_bool", &numpy::full_like_bool);
     m.def("zeros_like_bool", &numpy::zeros_like_bool);
     m.def("ones_like_bool", &numpy::ones_like_bool);
@@ -60,6 +62,10 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("ones", &numpy::ones);
 
     // -- astype ------------------------------------------------------------
+    // NOTE: astype_int / astype_bool / astype_bool_from_int instead of a
+    // single "astype" — pybind11 cannot resolve overloads that differ only
+    // by return type (e.g. astype<double> vs astype<bool> both take
+    // py::array_t<double>). Each dtype combo needs a distinct Python name.
     m.def("astype_int", static_cast<py::array_t<int>(*)(const py::array_t<double>&)>(&numpy::astype_int));
     m.def("astype_bool", static_cast<py::array_t<bool>(*)(const py::array_t<double>&)>(&numpy::astype_bool));
     m.def("astype_bool_from_int", static_cast<py::array_t<bool>(*)(const py::array_t<int>&)>(&numpy::astype_bool_from_int));
@@ -85,8 +91,10 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("all", static_cast<bool(*)(const py::array_t<bool>&)>(&numpy::all));
 
     // -- mean with axis (always returns double) ----------------------------
-    m.def("mean", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int)>(&numpy::mean));
-    m.def("mean", static_cast<py::array_t<double>(*)(const py::array_t<float>&,  int)>(&numpy::mean));
+    m.def("mean", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int)>(&numpy::mean),
+          py::arg("arr"), py::arg("axis"));
+    m.def("mean", static_cast<py::array_t<double>(*)(const py::array_t<float>&,  int)>(&numpy::mean),
+          py::arg("arr"), py::arg("axis"));
 
     // -- Comparison --------------------------------------------------------
     m.def("greater", static_cast<py::array_t<bool>(*)(const py::array_t<double>&, double)>(&numpy::greater));
@@ -134,6 +142,9 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("slice", static_cast<py::array(*)(const py::array&, py::ssize_t, py::ssize_t)>(&numpy::slice));
 
     // -- Column slice ------------------------------------------------------
+    // NOTE: named take_cols, not take — numpy.take(a, indices, axis) is
+    // fully general; this is a specialized subset (first N columns, axis=1,
+    // 2D only) exposing a simpler (arr, n) signature.
     BIND_F_MANIP1(take_cols);
 
     // -- Slice assignment ---------------------------------------------------
@@ -173,7 +184,8 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("isfinite", static_cast<py::array_t<bool>(*)(const py::array_t<float>&)>(&numpy::isfinite));
 
     // -- Array manipulation ------------------------------------------------
-    m.def("diff", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int, int)>(&numpy::diff));
+    m.def("diff", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int, int)>(&numpy::diff),
+          py::arg("arr"), py::arg("n") = 1, py::arg("axis") = -1);
     m.def("diff", static_cast<py::array_t<float>(*)(const py::array_t<float>&, int, int)>(&numpy::diff),
           py::arg("arr"), py::arg("n") = 1, py::arg("axis") = -1);
     BIND_F_STACK(stack); BIND_F_STACK(concatenate); BIND_F_STACK(vstack); BIND_F_STACK(hstack);

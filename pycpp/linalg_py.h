@@ -11,29 +11,39 @@ namespace py = pybind11;
 namespace numpy {
 namespace linalg {
 
+/// numpy.linalg.norm(x, ord=None, axis=None, keepdims=False)
 template<typename T>
 T norm(const py::array_t<T>& arr) {
     auto buf = arr.request();
     return norm(static_cast<const T*>(buf.ptr), buf.size);
 }
 
+/// numpy.linalg.norm(x, ord=None, axis=N, keepdims=False) — N-D with axis
 template<typename T>
-py::array_t<double> norm_axis1(const py::array_t<T>& arr) {
+py::array_t<double> norm(const py::array_t<T>& arr, int axis = -1) {
     auto buf = arr.request();
-    if (buf.ndim != 2) {
-        py::array_t<double> result({1});
-        *static_cast<double*>(result.request().ptr) = static_cast<double>(norm(arr));
-        return result;
-    }
-    py::ssize_t rows = buf.shape[0], cols = buf.shape[1];
-    py::array_t<double> result({rows});
-    norm_axis1(static_cast<const T*>(buf.ptr),
-                      static_cast<double*>(result.request().ptr), rows, cols);
+    int ndim = static_cast<int>(buf.ndim);
+    int ax = (axis == -1) ? ndim - 1 : axis;
+
+    std::vector<ptrdiff_t> shape(buf.shape.begin(), buf.shape.end());
+
+    // Output shape: drop the reduced axis
+    std::vector<ptrdiff_t> out_shape;
+    for (int d = 0; d < ndim; ++d)
+        if (d != ax) out_shape.push_back(shape[d]);
+    if (out_shape.empty()) out_shape.push_back(1);
+
+    std::vector<py::ssize_t> py_out_shape(out_shape.begin(), out_shape.end());
+    py::array_t<double> result(py_out_shape);
+    numpy::norm_axis(static_cast<const T*>(buf.ptr),
+                            static_cast<double*>(result.request().ptr),
+                            shape.data(), ndim, ax);
     return result;
 }
 
 } // namespace linalg
 
+/// numpy.dot(a, b, out=None)
 template<typename T>
 T dot(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();

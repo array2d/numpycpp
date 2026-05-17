@@ -1,8 +1,10 @@
 // Native C++ implementations — zero pybind11 dependency.
 // All functions operate on raw pointers + sizes.
-// Namespace: numpy::impl
 //
 // Usable by any C++ project via #include "numpy/core.h"
+//
+// Convention: each function is annotated with its Python numpy equivalent,
+// e.g. /// numpy.sqrt(x, /, out=None, *, where=True, ...)
 
 #pragma once
 
@@ -19,16 +21,20 @@ namespace numpy {
 // ============================================================================
 // Array creation
 // ============================================================================
+
+/// numpy.zeros_like(a, dtype=None, order='K', subok=True, shape=None)
 template<typename T>
 inline void zeros_like(T* dst, size_t n) {
     std::fill_n(dst, n, T(0));
 }
 
+/// numpy.ones_like(a, dtype=None, order='K', subok=True, shape=None)
 template<typename T>
 inline void ones_like(T* dst, size_t n) {
     std::fill_n(dst, n, T(1));
 }
 
+/// numpy.full_like(a, fill_value, dtype=None, order='K', subok=True, shape=None)
 template<typename T>
 inline void full_like(T* dst, size_t n, T fill_value) {
     std::fill_n(dst, n, fill_value);
@@ -37,102 +43,123 @@ inline void full_like(T* dst, size_t n, T fill_value) {
 // ============================================================================
 // Element-wise math — T in → T out
 // ============================================================================
+
+/// numpy.sqrt(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void sqrt(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::sqrt(src[i]);
 }
 
+/// numpy.abs(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void abs(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::abs(src[i]);
 }
 
+/// numpy.exp(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void exp(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::exp(src[i]);
 }
 
+/// numpy.log(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void log(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::log(src[i]);
 }
 
+/// numpy.sin(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void sin(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::sin(src[i]);
 }
 
+/// numpy.cos(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void cos(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::cos(src[i]);
 }
 
+/// numpy.tan(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void tan(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::tan(src[i]);
 }
 
+/// numpy.power(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
 inline void power(const T* src, T* dst, size_t n, T exponent) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::pow(src[i], exponent);
 }
 
+/// numpy.clip(a, a_min, a_max, out=None, **kwargs)
 template<typename T>
 inline void clip(const T* src, T* dst, size_t n, T min_val, T max_val) {
     for (size_t i = 0; i < n; ++i)
         dst[i] = std::max(min_val, std::min(max_val, src[i]));
 }
 
+/// numpy.log10(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void log10(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::log10(src[i]);
 }
 
+/// numpy.log2(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void log2(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::log2(src[i]);
 }
 
+/// numpy.arcsin(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void arcsin(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::asin(src[i]);
 }
 
+/// numpy.arccos(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void arccos(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::acos(src[i]);
 }
 
+/// numpy.arctan(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void arctan(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::atan(src[i]);
 }
 
+/// numpy.round(a, decimals=0, out=None)
 template<typename T>
 inline void round(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::round(src[i]);
 }
 
+/// numpy.floor(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void floor(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::floor(src[i]);
 }
 
+/// numpy.ceil(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void ceil(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::ceil(src[i]);
 }
 
+/// numpy.degrees(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void degrees(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = src[i] * T(180.0 / M_PI);
 }
 
+/// numpy.radians(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void radians(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = src[i] * T(M_PI / 180.0);
 }
 
+/// numpy.sign(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void sign(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = T((src[i] > T(0)) - (src[i] < T(0)));
@@ -141,6 +168,8 @@ inline void sign(const T* src, T* dst, size_t n) {
 // ============================================================================
 // Reduction — T in → T out
 // ============================================================================
+
+/// numpy.sum(a, axis=None, dtype=None, out=None, keepdims=False, ...)
 template<typename T>
 inline T sum(const T* data, size_t n) {
     T total = T(0);
@@ -148,12 +177,14 @@ inline T sum(const T* data, size_t n) {
     return total;
 }
 
+/// numpy.mean(a, axis=None, dtype=None, out=None, keepdims=False, *)
 template<typename T>
 inline T mean(const T* data, size_t n) {
     if (n == 0) return T(0);
     return sum(data, n) / static_cast<T>(n);
 }
 
+/// numpy.max(a, axis=None, out=None, keepdims=False, initial=..., where=...)
 template<typename T>
 inline T max(const T* data, size_t n) {
     if (n == 0) return T(0);
@@ -163,6 +194,7 @@ inline T max(const T* data, size_t n) {
     return m;
 }
 
+/// numpy.min(a, axis=None, out=None, keepdims=False, initial=..., where=...)
 template<typename T>
 inline T min(const T* data, size_t n) {
     if (n == 0) return T(0);
@@ -172,18 +204,22 @@ inline T min(const T* data, size_t n) {
     return m;
 }
 
+/// numpy.any(a, axis=None, out=None, keepdims=False, *)
 inline bool any(const bool* data, size_t n) {
     for (size_t i = 0; i < n; ++i)
         if (data[i]) return true;
     return false;
 }
 
+/// numpy.all(a, axis=None, out=None, keepdims=False, *)
 inline bool all(const bool* data, size_t n) {
     for (size_t i = 0; i < n; ++i)
         if (!data[i]) return false;
     return true;
 }
 
+/// numpy.std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *)
+//  NOTE: named 'stddev' because 'std' conflicts with C++ namespace std.
 template<typename T>
 inline T stddev(const T* data, size_t n) {
     if (n == 0) return T(0);
@@ -196,6 +232,7 @@ inline T stddev(const T* data, size_t n) {
     return std::sqrt(sum_sq / static_cast<T>(n));
 }
 
+/// numpy.var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *)
 template<typename T>
 inline T var(const T* data, size_t n) {
     if (n == 0) return T(0);
@@ -210,37 +247,51 @@ inline T var(const T* data, size_t n) {
 
 // ============================================================================
 // Comparison — T in → bool out
+//
+// NOTE: _scalar / _array suffix convention for internal native helpers that
+// share the same numpy API name. C++ disallows overloads with identical
+// signatures, so scalar-vs-array variants are disambiguated in the native
+// layer. Wrappers (pycpp/) expose the unified numpy name via their own
+// overloads; these suffixed helpers are NOT bound directly to Python.
 // ============================================================================
+
+/// numpy.greater(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
 inline void greater(const T* src, bool* dst, size_t n, T threshold) {
     for (size_t i = 0; i < n; ++i) dst[i] = (src[i] > threshold);
 }
 
+/// numpy.less(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
 inline void less(const T* src, bool* dst, size_t n, T threshold) {
     for (size_t i = 0; i < n; ++i) dst[i] = (src[i] < threshold);
 }
 
+/// numpy.equal(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
 inline void equal(const T* src, bool* dst, size_t n, T val) {
     for (size_t i = 0; i < n; ++i) dst[i] = (src[i] == val);
 }
 
+/// numpy.greater_equal(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
 inline void greater_equal(const T* src, bool* dst, size_t n, T threshold) {
     for (size_t i = 0; i < n; ++i) dst[i] = (src[i] >= threshold);
 }
 
+/// numpy.less_equal(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
 inline void less_equal(const T* src, bool* dst, size_t n, T threshold) {
     for (size_t i = 0; i < n; ++i) dst[i] = (src[i] <= threshold);
 }
 
+/// numpy.not_equal(x1, x2, /, out=None, *, where=True, ...) — scalar variant
 template<typename T>
 inline void not_equal_scalar(const T* src, bool* dst, size_t n, T val) {
     for (size_t i = 0; i < n; ++i) dst[i] = (src[i] != val);
 }
 
+/// numpy.not_equal(x1, x2, /, out=None, *, where=True, ...) — array variant
 template<typename T>
 inline void not_equal_array(const T* a, const T* b, bool* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = (a[i] != b[i]);
@@ -249,18 +300,23 @@ inline void not_equal_array(const T* a, const T* b, bool* dst, size_t n) {
 // ============================================================================
 // Logical — bool in → bool out
 // ============================================================================
+
+/// numpy.logical_and(x1, x2, /, out=None, *, where=True, ...)
 inline void logical_and(const bool* a, const bool* b, bool* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = a[i] && b[i];
 }
 
+/// numpy.logical_or(x1, x2, /, out=None, *, where=True, ...)
 inline void logical_or(const bool* a, const bool* b, bool* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = a[i] || b[i];
 }
 
+/// numpy.logical_not(x, /, out=None, *, where=True, ...)
 inline void logical_not(const bool* src, bool* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = !src[i];
 }
 
+/// numpy.logical_xor(x1, x2, /, out=None, *, where=True, ...)
 inline void logical_xor(const bool* a, const bool* b, bool* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = a[i] ^ b[i];
 }
@@ -268,16 +324,20 @@ inline void logical_xor(const bool* a, const bool* b, bool* dst, size_t n) {
 // ============================================================================
 // Special value helpers — T in → bool out
 // ============================================================================
+
+/// numpy.isnan(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void isnan(const T* src, bool* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::isnan(src[i]);
 }
 
+/// numpy.isinf(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void isinf(const T* src, bool* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::isinf(src[i]);
 }
 
+/// numpy.isfinite(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void isfinite(const T* src, bool* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::isfinite(src[i]);
@@ -286,31 +346,38 @@ inline void isfinite(const T* src, bool* dst, size_t n) {
 // ============================================================================
 // Binary element-wise — 2 arrays T in → T out
 // ============================================================================
+
+/// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 inline void arctan2_array(const T* a, const T* b, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::atan2(a[i], b[i]);
 }
 
+/// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-scalar
 template<typename T>
 inline void arctan2_scalar(const T* src, T* dst, size_t n, T b) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::atan2(src[i], b);
 }
 
+/// numpy.maximum(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 inline void maximum_array(const T* a, const T* b, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::max(a[i], b[i]);
 }
 
+/// numpy.maximum(x1, x2, /, out=None, *, where=True, ...) — scalar variant
 template<typename T>
 inline void maximum_scalar(const T* src, T* dst, size_t n, T b) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::max(src[i], b);
 }
 
+/// numpy.minimum(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 inline void minimum_array(const T* a, const T* b, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::min(a[i], b[i]);
 }
 
+/// numpy.minimum(x1, x2, /, out=None, *, where=True, ...) — scalar variant
 template<typename T>
 inline void minimum_scalar(const T* src, T* dst, size_t n, T b) {
     for (size_t i = 0; i < n; ++i) dst[i] = std::min(src[i], b);
@@ -320,36 +387,68 @@ inline void minimum_scalar(const T* src, T* dst, size_t n, T b) {
 // Array manipulation
 // ============================================================================
 
-// diff_1d: src has n elements, dst has n-1 elements
+/// numpy.diff(a, n=1, axis=-1, prepend=..., append=...) — N-D, n=1
 template<typename T>
-inline void diff_1d(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n - 1; ++i) dst[i] = src[i + 1] - src[i];
+inline void diff(const T* src, T* dst, const ptrdiff_t* shape, int ndim, int axis) {
+    if (ndim == 0) return;
+
+    // Normalize axis
+    if (axis < 0) axis += ndim;
+    ptrdiff_t axis_size = shape[axis];
+    if (axis_size < 2) return;
+
+    // Strides for C-contiguous layout
+    std::vector<ptrdiff_t> in_stride(ndim);
+    in_stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        in_stride[d] = in_stride[d + 1] * shape[d + 1];
+
+    // Output shape: same as input but axis_size - 1 along 'axis'
+    std::vector<ptrdiff_t> out_shape(shape, shape + ndim);
+    out_shape[axis] = axis_size - 1;
+
+    std::vector<ptrdiff_t> out_stride(ndim);
+    out_stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        out_stride[d] = out_stride[d + 1] * out_shape[d + 1];
+
+    ptrdiff_t in_axis_stride = in_stride[axis];
+    ptrdiff_t out_axis_stride = out_stride[axis];
+
+    // Number of fibers = product of all non-axis dimensions
+    ptrdiff_t n_fibers = 1;
+    for (int d = 0; d < ndim; ++d)
+        if (d != axis) n_fibers *= shape[d];
+
+    // For each fiber, do 1D diff along axis
+    for (ptrdiff_t f = 0; f < n_fibers; ++f) {
+        // Decompose fiber index f → multi-index (non-axis dims)
+        ptrdiff_t rem = f;
+        ptrdiff_t in_base = 0, out_base = 0;
+        for (int d = ndim - 1; d >= 0; --d) {
+            if (d == axis) continue;
+            ptrdiff_t idx = rem % shape[d];
+            rem /= shape[d];
+            in_base += idx * in_stride[d];
+            out_base += idx * out_stride[d];
+        }
+
+        for (ptrdiff_t i = 0; i < axis_size - 1; ++i) {
+            dst[out_base + i * out_axis_stride] =
+                src[in_base + (i + 1) * in_axis_stride] -
+                src[in_base + i * in_axis_stride];
+        }
+    }
 }
 
-// diff_2d_axis0: result has (rows-1) * cols
-template<typename T>
-inline void diff_2d_axis0(const T* src, T* dst, size_t rows, size_t cols) {
-    for (size_t i = 0; i < rows - 1; ++i)
-        for (size_t j = 0; j < cols; ++j)
-            dst[i * cols + j] = src[(i + 1) * cols + j] - src[i * cols + j];
-}
-
-// diff_2d_axis1: result has rows * (cols-1)
-template<typename T>
-inline void diff_2d_axis1(const T* src, T* dst, size_t rows, size_t cols) {
-    for (size_t i = 0; i < rows; ++i)
-        for (size_t j = 0; j < cols - 1; ++j)
-            dst[i * (cols - 1) + j] = src[i * cols + j + 1] - src[i * cols + j];
-}
-
-// stack: n_arrays each with elem_size, dst is flat (n_arrays * elem_size)
+/// numpy.stack(arrays, axis=0, out=None, *, dtype=None, casting=...)
 template<typename T>
 inline void stack(const T* const* arrays, T* dst, size_t n_arrays, size_t elem_size) {
     for (size_t i = 0; i < n_arrays; ++i)
         std::memcpy(dst + i * elem_size, arrays[i], elem_size * sizeof(T));
 }
 
-// concatenate: arrays with individual elem_sizes, dst is flat
+/// numpy.concatenate((a1, a2, ...), axis=0, out=None, dtype=None, casting=...)
 template<typename T>
 inline void concatenate(const T* const* arrays, T* dst, const size_t* sizes, size_t n_arrays) {
     size_t off = 0;
@@ -359,27 +458,72 @@ inline void concatenate(const T* const* arrays, T* dst, const size_t* sizes, siz
     }
 }
 
-// where with scalar x, y
+/// numpy.where(condition, x, y) — scalar x, y
 template<typename T>
 inline void where_scalar(const bool* cond, T* dst, size_t n, T x, T y) {
     for (size_t i = 0; i < n; ++i) dst[i] = cond[i] ? x : y;
 }
 
-// where with array x, y
+/// numpy.where(condition, x, y) — array x, y
 template<typename T>
 inline void where_array(const bool* cond, T* dst, size_t n, const T* x, const T* y) {
     for (size_t i = 0; i < n; ++i) dst[i] = cond[i] ? x[i] : y[i];
 }
 
-// transpose_2d: src is rows×cols, dst is cols×rows
+/// numpy.transpose(a, axes=None) — 2D only
+/// numpy.transpose(a, axes=None) — N-D with arbitrary axis permutation
 template<typename T>
-inline void transpose_2d(const T* src, T* dst, size_t rows, size_t cols) {
-    for (size_t i = 0; i < rows; ++i)
-        for (size_t j = 0; j < cols; ++j)
-            dst[j * rows + i] = src[i * cols + j];
+inline void transpose(const T* src, T* dst, const ptrdiff_t* shape, int ndim, const int* axes) {
+    if (ndim <= 1) {
+        if (ndim == 1) std::memcpy(dst, src, shape[0] * sizeof(T));
+        return;
+    }
+
+    // Build permutation: use axes if given, else reverse
+    std::vector<int> perm(ndim);
+    if (axes) {
+        for (int i = 0; i < ndim; ++i) perm[i] = axes[i];
+    } else {
+        for (int i = 0; i < ndim; ++i) perm[i] = ndim - 1 - i;
+    }
+
+    // Input strides (C-contiguous)
+    std::vector<ptrdiff_t> in_stride(ndim);
+    in_stride[ndim - 1] = 1;
+    for (int i = ndim - 2; i >= 0; --i)
+        in_stride[i] = in_stride[i + 1] * shape[i + 1];
+
+    // Output shape
+    std::vector<ptrdiff_t> out_shape(ndim);
+    for (int i = 0; i < ndim; ++i) out_shape[i] = shape[perm[i]];
+
+    // Output strides (C-contiguous)
+    std::vector<ptrdiff_t> out_stride(ndim);
+    out_stride[ndim - 1] = 1;
+    for (int i = ndim - 2; i >= 0; --i)
+        out_stride[i] = out_stride[i + 1] * out_shape[i + 1];
+
+    // Inverse permutation: output dim j → input dim perm[j]
+    // For output coord out_coord, input coord in_coord[perm[j]] = out_coord[j]
+    // → in_coord[perm[j]] = out_coord[j] → in_flat = sum_j out_coord[j] * in_stride[perm[j]]
+
+    ptrdiff_t total = 1;
+    for (int i = 0; i < ndim; ++i) total *= out_shape[i];
+
+    // Iterate output in C order
+    for (ptrdiff_t out_idx = 0; out_idx < total; ++out_idx) {
+        ptrdiff_t rem = out_idx;
+        ptrdiff_t in_idx = 0;
+        for (int j = ndim - 1; j >= 0; --j) {
+            ptrdiff_t c = rem % out_shape[j];
+            rem /= out_shape[j];
+            in_idx += c * in_stride[perm[j]];
+        }
+        dst[out_idx] = src[in_idx];
+    }
 }
 
-// roll: cyclic shift (shift >= 0)
+/// numpy.roll(a, shift, axis=None)
 template<typename T>
 inline void roll(const T* src, T* dst, size_t n, ptrdiff_t shift) {
     shift = shift % static_cast<ptrdiff_t>(n);
@@ -389,13 +533,14 @@ inline void roll(const T* src, T* dst, size_t n, ptrdiff_t shift) {
         dst[(i + s) % n] = src[i];
 }
 
+/// numpy.flip(m, axis=None)
 template<typename T>
 inline void flip(const T* src, T* dst, size_t n) {
     for (size_t i = 0; i < n; ++i)
         dst[i] = src[n - 1 - i];
 }
 
-// repeat: each element repeated 'reps' times
+/// numpy.repeat(a, repeats, axis=None)
 template<typename T>
 inline void repeat(const T* src, T* dst, size_t n, size_t reps) {
     for (size_t i = 0; i < n; ++i)
@@ -403,21 +548,21 @@ inline void repeat(const T* src, T* dst, size_t n, size_t reps) {
             dst[i * reps + r] = src[i];
 }
 
-// tile: entire array repeated 'reps' times as blocks
+/// numpy.tile(A, reps)
 template<typename T>
 inline void tile(const T* src, T* dst, size_t n, size_t reps) {
     for (size_t r = 0; r < reps; ++r)
         std::memcpy(dst + r * n, src, n * sizeof(T));
 }
 
-// take_cols: extract first n_cols from each row
+/// numpy.take(a, indices, axis=1) — extract first n_cols from each row
 template<typename T>
 inline void take_cols(const T* src, T* dst, size_t rows, size_t src_cols, size_t n_cols) {
     for (size_t i = 0; i < rows; ++i)
         std::memcpy(dst + i * n_cols, src + i * src_cols, n_cols * sizeof(T));
 }
 
-// slice_assign: fill data[start..n) with value
+/// slice assignment: a[start:] = value
 template<typename T>
 inline void slice_assign(T* data, size_t n, size_t start, T value) {
     if (start >= n) return;
@@ -427,6 +572,8 @@ inline void slice_assign(T* data, size_t n, size_t start, T value) {
 // ============================================================================
 // Sorting and indexing
 // ============================================================================
+
+/// numpy.argsort(a, axis=-1, kind=None, order=None)
 template<typename T>
 inline void argsort(const T* data, ptrdiff_t* indices, size_t n) {
     for (size_t i = 0; i < n; ++i) indices[i] = static_cast<ptrdiff_t>(i);
@@ -434,6 +581,7 @@ inline void argsort(const T* data, ptrdiff_t* indices, size_t n) {
         [data](ptrdiff_t a, ptrdiff_t b) { return data[a] < data[b]; });
 }
 
+/// numpy.argmax(a, axis=None, out=None, *, keepdims=...)
 template<typename T>
 inline ptrdiff_t argmax(const T* data, size_t n) {
     if (n == 0) return -1;
@@ -443,6 +591,7 @@ inline ptrdiff_t argmax(const T* data, size_t n) {
     return mi;
 }
 
+/// numpy.argmin(a, axis=None, out=None, *, keepdims=...)
 template<typename T>
 inline ptrdiff_t argmin(const T* data, size_t n) {
     if (n == 0) return -1;
@@ -455,12 +604,15 @@ inline ptrdiff_t argmin(const T* data, size_t n) {
 // ============================================================================
 // Set operations
 // ============================================================================
+
+/// numpy.isin(element, test_elements, assume_unique=False, invert=False)
 inline void isin(const double* arr, bool* dst, size_t n,
                   const double* values, size_t nv) {
     std::unordered_set<double> vs(values, values + nv);
     for (size_t i = 0; i < n; ++i) dst[i] = vs.count(arr[i]) > 0;
 }
 
+/// numpy.intersect1d(ar1, ar2, assume_unique=False, return_indices=False)
 inline std::vector<double> intersect1d(const double* a, size_t na,
                                         const double* b, size_t nb) {
     std::unordered_set<double> sa(a, a + na), sb(b, b + nb);
@@ -473,6 +625,8 @@ inline std::vector<double> intersect1d(const double* a, size_t na,
 // ============================================================================
 // Interpolation
 // ============================================================================
+
+/// numpy.interp(x, xp, fp, left=None, right=None, period=None)
 inline void interp(const double* x, double* dst, size_t nx,
                     const double* xp, const double* fp, size_t np) {
     for (size_t i = 0; i < nx; ++i) {
@@ -489,8 +643,10 @@ inline void interp(const double* x, double* dst, size_t nx,
 }
 
 // ============================================================================
-// Safe division
+// Safe division — utility, not a numpy API
 // ============================================================================
+
+/// safe_divide(a, b, default_val=0.0): returns a/b, or default_val if b == 0
 inline double safe_divide(double a, double b, double default_val = 0.0) {
     return b == 0.0 ? default_val : a / b;
 }
@@ -498,18 +654,14 @@ inline double safe_divide(double a, double b, double default_val = 0.0) {
 // ============================================================================
 // astype conversions
 // ============================================================================
-inline void astype_int(const double* src, int* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = static_cast<int>(src[i]);
+
+/// ndarray.astype(dtype, order='K', casting='unsafe', subok=True, copy=True)
+template<typename Tout, typename Tin>
+inline void astype(const Tin* src, Tout* dst, size_t n) {
+    for (size_t i = 0; i < n; ++i) dst[i] = static_cast<Tout>(src[i]);
 }
 
-inline void astype_bool(const double* src, bool* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = static_cast<bool>(src[i]);
-}
-
-inline void astype_bool_from_int(const int* src, bool* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = static_cast<bool>(src[i]);
-}
-
+/// float64 → float32 → float64 roundtrip (for precision testing)
 inline void truncate_to_float32(const double* src, double* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) {
         float tmp = static_cast<float>(src[i]);
@@ -521,65 +673,58 @@ inline void truncate_to_float32(const double* src, double* dst, size_t n) {
 // mean_axis: T in → double out (matching numpy dtype promotion)
 // ============================================================================
 
+/// ndarray.mean(axis=N) — N-D, T in → double out (numpy dtype promotion)
 template<typename T>
-inline void mean_axis0_2d(const T* src, double* dst, size_t rows, size_t cols) {
-    for (size_t j = 0; j < cols; ++j) {
-        double sum = 0.0;
-        for (size_t i = 0; i < rows; ++i)
-            sum += static_cast<double>(src[i * cols + j]);
-        dst[j] = sum / static_cast<double>(rows);
-    }
-}
+inline void mean_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndim, int axis) {
+    if (ndim == 0) return;
+    if (axis < 0) axis += ndim;
+    ptrdiff_t axis_size = shape[axis];
+    if (axis_size == 0) return;
 
-template<typename T>
-inline void mean_axis1_2d(const T* src, double* dst, size_t rows, size_t cols) {
-    for (size_t i = 0; i < rows; ++i) {
-        double sum = 0.0;
-        for (size_t j = 0; j < cols; ++j)
-            sum += static_cast<double>(src[i * cols + j]);
-        dst[i] = sum / static_cast<double>(cols);
-    }
-}
+    // Strides for C-contiguous layout
+    std::vector<ptrdiff_t> stride(ndim);
+    stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        stride[d] = stride[d + 1] * shape[d + 1];
 
-template<typename T>
-inline void mean_axis0_3d(const T* src, double* dst, size_t d0, size_t d1, size_t d2) {
-    size_t d1d2 = d1 * d2;
-    for (size_t i = 0; i < d1d2; ++i) {
-        double sum = 0.0;
-        for (size_t k = 0; k < d0; ++k)
-            sum += static_cast<double>(src[k * d1d2 + i]);
-        dst[i] = sum / static_cast<double>(d0);
-    }
-}
+    ptrdiff_t axis_stride = stride[axis];
 
-template<typename T>
-inline void mean_axis1_3d(const T* src, double* dst, size_t d0, size_t d1, size_t d2) {
-    for (size_t i = 0; i < d0; ++i) {
-        for (size_t k = 0; k < d2; ++k) {
-            double sum = 0.0;
-            for (size_t j = 0; j < d1; ++j)
-                sum += static_cast<double>(src[i * d1 * d2 + j * d2 + k]);
-            dst[i * d2 + k] = sum / static_cast<double>(d1);
+    // Number of fibers = product of all non-axis dimensions
+    ptrdiff_t n_fibers = 1;
+    for (int d = 0; d < ndim; ++d)
+        if (d != axis) n_fibers *= shape[d];
+
+    // Output stride for the flattened 1D dst
+    std::vector<ptrdiff_t> out_shape(shape, shape + ndim);
+    out_shape[axis] = 1;  // reduced dimension
+    std::vector<ptrdiff_t> out_stride(ndim);
+    out_stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        out_stride[d] = out_stride[d + 1] * out_shape[d + 1];
+
+    for (ptrdiff_t f = 0; f < n_fibers; ++f) {
+        ptrdiff_t rem = f;
+        ptrdiff_t in_base = 0, out_base = 0;
+        for (int d = ndim - 1; d >= 0; --d) {
+            if (d == axis) continue;
+            ptrdiff_t idx = rem % shape[d];
+            rem /= shape[d];
+            in_base += idx * stride[d];
+            out_base += idx * out_stride[d];
         }
-    }
-}
 
-template<typename T>
-inline void mean_axis2_3d(const T* src, double* dst, size_t d0, size_t d1, size_t d2) {
-    for (size_t i = 0; i < d0; ++i) {
-        for (size_t j = 0; j < d1; ++j) {
-            double sum = 0.0;
-            const T* row = src + i * d1 * d2 + j * d2;
-            for (size_t k = 0; k < d2; ++k)
-                sum += static_cast<double>(row[k]);
-            dst[i * d1 + j] = sum / static_cast<double>(d2);
-        }
+        double sum = 0.0;
+        for (ptrdiff_t i = 0; i < axis_size; ++i)
+            sum += static_cast<double>(src[in_base + i * axis_stride]);
+        dst[out_base] = sum / static_cast<double>(axis_size);
     }
 }
 
 // ============================================================================
 // norm, dot — used by linalg
 // ============================================================================
+
+/// squared L2 norm (internal helper for linalg.norm)
 template<typename T>
 inline T norm_sq(const T* data, size_t n) {
     T s = T(0);
@@ -587,6 +732,7 @@ inline T norm_sq(const T* data, size_t n) {
     return s;
 }
 
+/// numpy.dot(a, b, out=None) — 1D vector dot product
 template<typename T>
 inline T dot(const T* a, const T* b, size_t n) {
     T s = T(0);
@@ -594,15 +740,52 @@ inline T dot(const T* a, const T* b, size_t n) {
     return s;
 }
 
+/// numpy.linalg.norm(x, ord=None, axis=N, keepdims=False) — N-D
 template<typename T>
-inline void norm_axis1(const T* src, double* dst, size_t rows, size_t cols) {
-    for (size_t i = 0; i < rows; ++i) {
+inline void norm_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndim, int axis) {
+    if (ndim == 0) return;
+    if (axis < 0) axis += ndim;
+    ptrdiff_t axis_size = shape[axis];
+    if (axis_size == 0) return;
+
+    // Strides for C-contiguous layout
+    std::vector<ptrdiff_t> stride(ndim);
+    stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        stride[d] = stride[d + 1] * shape[d + 1];
+
+    ptrdiff_t axis_stride = stride[axis];
+
+    // Number of fibers
+    ptrdiff_t n_fibers = 1;
+    for (int d = 0; d < ndim; ++d)
+        if (d != axis) n_fibers *= shape[d];
+
+    // Output stride (same pattern as mean_axis: reduced axis has size 1)
+    std::vector<ptrdiff_t> out_shape(shape, shape + ndim);
+    out_shape[axis] = 1;
+    std::vector<ptrdiff_t> out_stride(ndim);
+    out_stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        out_stride[d] = out_stride[d + 1] * out_shape[d + 1];
+
+    for (ptrdiff_t f = 0; f < n_fibers; ++f) {
+        ptrdiff_t rem = f;
+        ptrdiff_t in_base = 0, out_base = 0;
+        for (int d = ndim - 1; d >= 0; --d) {
+            if (d == axis) continue;
+            ptrdiff_t idx = rem % shape[d];
+            rem /= shape[d];
+            in_base += idx * stride[d];
+            out_base += idx * out_stride[d];
+        }
+
         double sum = 0.0;
-        for (size_t j = 0; j < cols; ++j) {
-            double v = static_cast<double>(src[i * cols + j]);
+        for (ptrdiff_t i = 0; i < axis_size; ++i) {
+            double v = static_cast<double>(src[in_base + i * axis_stride]);
             sum += v * v;
         }
-        dst[i] = std::sqrt(sum);
+        dst[out_base] = std::sqrt(sum);
     }
 }
 
