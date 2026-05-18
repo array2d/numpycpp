@@ -21,11 +21,10 @@ jobs:
           pip3 install pybind11 numpy pytest
 
       - name: Build test module
-        working-directory: tests
-        run: make
+        run: make -C tests
 
       - name: Run tests
-        run: PYTHONPATH=tests:$PYTHONPATH python3 -m pytest tests/ -v
+        run: make -C tests test
 
   # ---- Release: build .deb and publish on tag -------------------------------
   release:
