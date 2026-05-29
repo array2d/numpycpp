@@ -346,14 +346,7 @@ void einsum(const std::string& subscripts,
             auto b_str = compute_strides(shapes[1]);
             int n_out = static_cast<int>(output_labels.size());
 
-            // Stack for small dimension counts (common: coupling vectors 1-3 dims)
-            #define D8 8
-            ptrdiff_t  stk_stepA[D8], stk_stepB[D8], stk_ostride[D8];
-            vector<ptrdiff_t> heap_stepA, heap_stepB, heap_ostride;
-            ptrdiff_t* stepA = (n_out <= D8) ? stk_stepA : (heap_stepA.resize(n_out), heap_stepA.data());
-            ptrdiff_t* stepB = (n_out <= D8) ? stk_stepB : (heap_stepB.resize(n_out), heap_stepB.data());
-            ptrdiff_t* ostride = (n_out <= D8) ? stk_ostride : (heap_ostride.resize(n_out), heap_ostride.data());
-
+            vector<ptrdiff_t> stepA(n_out), stepB(n_out), ostride(n_out);
             for (int d = 0; d < n_out; ++d) {
                 char c = output_labels[d];
                 int aa = -1, ba = -1;
@@ -388,15 +381,12 @@ void einsum(const std::string& subscripts,
                 else
                     result_ptr[oi] = einsum_reduce_f32(a_ptr + a_off, b_ptr + b_off, csize_u);
             }
-            #undef D8
             return;
         }
     }
 
     // ================================================================
-    // Scalar path: general case.
-    //   - Iterative stride walk (no division per flat index)
-    //   - Stack allocation for small dimension counts
+    // Scalar path: general case — iterative stride walk, no division.
     // ================================================================
     vector<char> iter_labels = output_labels;
     iter_labels.insert(iter_labels.end(), sum_labels.begin(), sum_labels.end());
@@ -407,47 +397,22 @@ void einsum(const std::string& subscripts,
     for (int i = 0; i < n_iter; ++i)
         iter_sizes[i] = label_size[iter_labels[i]];
 
-    auto iter_strides = compute_strides(iter_sizes);
-    auto strides_a    = compute_strides(shapes[0]);
-    auto strides_b    = compute_strides(shapes[1]);
+    auto strides_a = compute_strides(shapes[0]);
+    auto strides_b = compute_strides(shapes[1]);
 
-    // iter_input_axis: [li][inp] = axis index or -1
-    #define MAX_DIM 16
-    int  stack_iax[MAX_DIM][2];
-    vector<int> heap_iax;
-    int (*iax)[2];
-    if (n_iter <= MAX_DIM) {
-        for (int li = 0; li < n_iter; ++li)
-            stack_iax[li][0] = stack_iax[li][1] = -1;
-        for (int li = 0; li < n_iter; ++li) {
-            char l = iter_labels[li];
-            for (const auto& [inp, ax] : label_axis[l])
-                stack_iax[li][inp] = ax;
-        }
-        iax = stack_iax;
-    } else {
-        heap_iax.assign(n_iter * 2, -1);
-        for (int li = 0; li < n_iter; ++li) {
-            char l = iter_labels[li];
-            for (const auto& [inp, ax] : label_axis[l])
-                heap_iax[li * 2 + inp] = ax;
-        }
-        iax = reinterpret_cast<int(*)[2]>(heap_iax.data());
+    // iter_input_axis: iax[li][inp] = axis index or -1
+    vector<int> iax_flat(n_iter * 2, -1);
+    for (int li = 0; li < n_iter; ++li) {
+        char l = iter_labels[li];
+        for (const auto& [inp, ax] : label_axis[l])
+            iax_flat[li * 2 + inp] = ax;
     }
+    int (*iax)[2] = reinterpret_cast<int(*)[2]>(iax_flat.data());
 
-    // iter_coord
-    ptrdiff_t  stack_coord[MAX_DIM] = {};
-    vector<ptrdiff_t> heap_coord;
-    ptrdiff_t* iter_coord = (n_iter <= MAX_DIM) ? stack_coord
-        : (heap_coord.assign(n_iter, 0), heap_coord.data());
-
-    // input_coord for each operand
-    ptrdiff_t  stack_ic[2][MAX_DIM] = {};
-    vector<ptrdiff_t> heap_ic[2];
-    ptrdiff_t* ic[2];
-    for (int inp = 0; inp < 2; ++inp)
-        ic[inp] = (ndim[inp] <= MAX_DIM) ? stack_ic[inp]
-            : (heap_ic[inp].assign(ndim[inp], 0), heap_ic[inp].data());
+    // iter_coord and input_coord
+    vector<ptrdiff_t> iter_coord(n_iter, 0);
+    vector<ptrdiff_t> ic0(ndim[0], 0), ic1(ndim[1], 0);
+    ptrdiff_t* ic[2] = {ic0.data(), ic1.data()};
 
     ptrdiff_t iter_total = 1;
     for (ptrdiff_t s : iter_sizes) iter_total *= s;
@@ -456,13 +421,13 @@ void einsum(const std::string& subscripts,
     T accumulator = T(0);
 
     for (ptrdiff_t flat = 0; flat < iter_total; ++flat) {
-        // Iterative coordinate update (faster than division)
+        // Iterative coordinate update
         if (flat > 0)
             for (int d = n_iter - 1; d >= 0; --d)
                 if (++iter_coord[d] < iter_sizes[d]) break;
                 else iter_coord[d] = 0;
 
-        // Check if this is the start of a new output element
+        // Start of new output element?
         bool is_new_output = true;
         for (int i = n_output; i < n_iter; ++i)
             if (iter_coord[i] != 0) { is_new_output = false; break; }
@@ -480,14 +445,9 @@ void einsum(const std::string& subscripts,
             accumulator = T(0);
         }
 
-        // Reset input_coord (memset is fast for small ndim — common case)
-        for (int inp = 0; inp < 2; ++inp)
-            if (ndim[inp] <= MAX_DIM)
-                memset(ic[inp], 0, static_cast<size_t>(ndim[inp]) * sizeof(ptrdiff_t));
-            else
-                std::fill_n(ic[inp], ndim[inp], ptrdiff_t(0));
-
-        // Map iter_coord → input_coord
+        // Reset input_coord and map iter_coord → input_coord
+        memset(ic[0], 0, static_cast<size_t>(ndim[0]) * sizeof(ptrdiff_t));
+        memset(ic[1], 0, static_cast<size_t>(ndim[1]) * sizeof(ptrdiff_t));
         for (int li = 0; li < n_iter; ++li)
             for (int inp = 0; inp < 2; ++inp) {
                 int ax = iax[li][inp];
@@ -497,7 +457,6 @@ void einsum(const std::string& subscripts,
         accumulator += a_ptr[flat_index(ic[0], strides_a.data(), ndim[0])]
                      * b_ptr[flat_index(ic[1], strides_b.data(), ndim[1])];
     }
-    #undef MAX_DIM
 
     if (current_output_idx >= 0)
         result_ptr[current_output_idx] = accumulator;
