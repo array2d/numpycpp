@@ -39,3 +39,11 @@ compile_commands.json
 # Packaging
 *.deb
 *.rpm
+
+# CMake packaging artifacts (in-source builds)
+CPackConfig.cmake
+CPackSourceConfig.cmake
+_CPack_Packages/
+install_manifest.txt
+numpycpp-config-version.cmake
+numpycpp-config.cmake
