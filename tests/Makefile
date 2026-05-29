@@ -26,7 +26,7 @@ $(MODULE): $(SRC)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ $(LDFLAGS)
 
 test: $(MODULE)
-	cd .. && PYTHONPATH=tests:$$PYTHONPATH python3 -m pytest tests/test_all.py -v
+	cd .. && PYTHONPATH=tests:$$PYTHONPATH python3 -m pytest tests/test_all.py -q --tb=short --no-header
 
 clean:
 	rm -f $(MODULE)
