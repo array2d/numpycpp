@@ -10,11 +10,11 @@ namespace numpy {
 namespace linalg {
 
 /// numpy.linalg.norm(x, ord=None, axis=None, keepdims=False) — frobenius/vector
-//  numpy 1.23.5 uses x.dot(x) + sqrt in native type (NO double promotion).
-//  For float32, dot() and sqrt() stay in float32.
+//  Uses norm_sq (pairwise sum) → matches np.sqrt(np.sum(x**2)).
+//  For float32, norm_sq() and sqrt() stay in float32.
 template<typename T>
 inline T norm(const T* data, size_t n) {
-    T sqnorm = numpy::dot(data, data, n);  // dot product in native type
+    T sqnorm = numpy::norm_sq(data, n);  // pairwise sum of squares
     return std::sqrt(sqnorm);
 }
 

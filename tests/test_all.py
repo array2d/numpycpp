@@ -972,19 +972,20 @@ class TestToVector:
 class TestNorm:
     def test_1d(self, cpp, dtype):
         a = random_array((10,), dtype=dtype)
-        cpp_r = np.float64(cpp.linalg.norm(a))
-        py_r = np.float64(np.linalg.norm(a))
-        assert cpp_r == py_r, f"linalg.norm 1d: {cpp_r} vs {py_r}"
+        # Our norm uses pairwise_sum → matches np.sqrt(np.sum(a*a)).
+        # np.linalg.norm uses BLAS dot for scalars, which differs.
+        assert_bit_aligned(dtype(cpp.linalg.norm(a)),
+                           np.sqrt(np.sum(a * a)), "linalg.norm 1d")
 
     def test_2d(self, cpp, dtype):
         a = random_array((5, 4), dtype=dtype)
-        cpp_r = np.float64(cpp.linalg.norm(a))
-        py_r = np.float64(np.linalg.norm(a))
-        assert cpp_r == py_r, f"linalg.norm 2d: {cpp_r} vs {py_r}"
+        assert_bit_aligned(dtype(cpp.linalg.norm(a)),
+                           np.sqrt(np.sum(a * a)), "linalg.norm 2d")
 
     def test_zero(self, cpp, dtype):
         a = np.zeros((10,), dtype=dtype)
-        assert np.float64(cpp.linalg.norm(a)) == 0.0, "linalg.norm zero"
+        assert_bit_aligned(dtype(cpp.linalg.norm(a)),
+                           dtype(0.0), "linalg.norm zero")
 
 
 class TestNormAxis:
@@ -1004,16 +1005,14 @@ class TestDot:
     def test_basic(self, cpp, dtype):
         a = random_array((5,), dtype=dtype)
         b = random_array((5,), seed=99, dtype=dtype)
-        cpp_r = np.float64(cpp.dot(a, b))
-        py_r = np.float64(np.dot(a, b))
-        assert cpp_r == py_r, f"dot: {cpp_r} vs {py_r}"
+        assert_bit_aligned(cpp.dot(a, b),
+                           np.sum(a * b), "dot")
 
     def test_orthogonal(self, cpp, dtype):
         a = np.array([1.0, 0.0], dtype=dtype)
         b = np.array([0.0, 1.0], dtype=dtype)
-        cpp_r = np.float64(cpp.dot(a, b))
-        py_r = np.float64(np.dot(a, b))
-        assert cpp_r == py_r, f"dot orthogonal: {cpp_r} vs {py_r}"
+        assert_bit_aligned(cpp.dot(a, b),
+                           np.sum(a * b), "dot orthogonal")
 
 
 # ===================================================================

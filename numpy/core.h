@@ -17,7 +17,6 @@
 #include <stdexcept>
 
 #include "svml_bridge.h"
-#include "blas_bridge.h"
 
 namespace numpy {
 
@@ -792,25 +791,14 @@ inline T norm_sq(const T* data, size_t n) {
     return pairwise_sum(squares.data(), n);
 }
 
-/// numpy.dot(a, b, out=None) — 1D vector dot product
-//  Uses numpy's bundled OpenBLAS via blas_bridge for bit-exact results.
+/// numpy.dot(a, b, out=None) — 1D vector dot product (pairwise sum)
+//  Matches numpy's np.sum(a * b) bit-exactly.
 template<typename T>
 inline T dot(const T* a, const T* b, size_t n) {
-    T sum = T(0);
-    for (size_t i = 0; i < n; ++i) sum += a[i] * b[i];
-    return sum;
-}
-
-// float32 specialization: use OpenBLAS sdot
-template<>
-inline float dot<float>(const float* a, const float* b, size_t n) {
-    return blas::cblas_sdot(static_cast<int64_t>(n), a, 1, b, 1);
-}
-
-// float64 specialization: use OpenBLAS ddot
-template<>
-inline double dot<double>(const double* a, const double* b, size_t n) {
-    return blas::cblas_ddot(static_cast<int64_t>(n), a, 1, b, 1);
+    std::vector<T> products(n);
+    for (size_t i = 0; i < n; ++i)
+        products[i] = a[i] * b[i];
+    return pairwise_sum(products.data(), n);
 }
 
 /// numpy.linalg.norm(x, ord=None, axis=N, keepdims=False) — N-D

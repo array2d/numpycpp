@@ -8,7 +8,6 @@
 #include "linalg_py.h"
 #include "einsum_py.h"
 #include "../numpy/svml_bridge.h"
-#include "../numpy/blas_bridge.h"
 
 namespace py = pybind11;
 
@@ -44,16 +43,13 @@ namespace py = pybind11;
 PYBIND11_MODULE(numpycpp, m) {
     m.doc() = "C++ pixel-level alignment of Python numpy, powered by Eigen";
 
-    // Initialize SVML and BLAS bridges via numpy's _multiarray_umath.so.
-    // Both use dlsym on the same handle — BLAS symbols are found through
-    // transitive dependencies (OpenBLAS is linked against _multiarray_umath).
+    // Initialize SVML bridge via numpy's _multiarray_umath.so.
     try {
         py::module_ np_core = py::module_::import("numpy.core._multiarray_umath");
         std::string umath_path = np_core.attr("__file__").cast<std::string>();
         numpy::svml::bridge_init(umath_path.c_str());
-        numpy::blas::blas_init(umath_path.c_str());
     } catch (...) {
-        // Fall back: SVML → libm, BLAS → sequential accumulation
+        // Fall back: SVML → libm
     }
 
     // -- linalg submodule --------------------------------------------------
