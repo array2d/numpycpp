@@ -10,6 +10,11 @@
 #include <algorithm>
 #include <stdexcept>
 #include <cstddef>
+#include <type_traits>
+
+// immintrin.h provides all SSE/AVX intrinsics needed by
+// einsum_reduce_f32/f64 (mulps, addps, haddps, etc.).
+#include <immintrin.h>
 
 namespace numpy {
 namespace einsum_detail {
@@ -64,6 +69,134 @@ inline ptrdiff_t flat_index(const std::vector<ptrdiff_t>& coord,
     for (size_t i = 0; i < coord.size(); ++i)
         idx += coord[i] * strides[i];
     return idx;
+}
+
+// ============================================================================
+// SIMD sum-of-products reduction — matches numpy's
+// *_sum_of_products_contig_contig_outstride0_two exactly.
+//
+// numpy's multiarray module uses SSE baseline SIMD with SEPARATE
+// mul+add (NOT FMA). Despite the CPU having AVX512 and FMA3, the
+// einsum kernel in the baseline multiarray module is compiled for SSE.
+//
+// Key observations from disassembling numpy's .so:
+//   - Uses xmm registers (SSE, 2-wide f64 / 4-wide f32)
+//   - mulpd/mulps + addpd/addps (NOT vfmadd)
+//   - haddpd/haddps for horizontal sum
+//   - Forward accumulation chain (NOT reverse-FMA)
+// ============================================================================
+
+inline double einsum_reduce_f64(const double* a, const double* b, size_t n) {
+    __m128d v_accum = _mm_setzero_pd();
+    const int vstep = 2;
+    size_t i = 0;
+    const size_t vstepx4 = vstep * 4;  // 8
+
+    // 4x unrolled block — forward mul+add chain, exactly as numpy SSE
+    for (; i + vstepx4 <= n; i += vstepx4) {
+        __m128d a3 = _mm_loadu_pd(a + i + 6);
+        __m128d b3 = _mm_loadu_pd(b + i + 6);
+        __m128d a2 = _mm_loadu_pd(a + i + 4);
+        __m128d b2 = _mm_loadu_pd(b + i + 4);
+        __m128d a1 = _mm_loadu_pd(a + i + 2);
+        __m128d b1 = _mm_loadu_pd(b + i + 2);
+        __m128d a0 = _mm_loadu_pd(a + i);
+        __m128d b0 = _mm_loadu_pd(b + i);
+
+        // numpy's exact forward chain:
+        //   accum += a3*b3  (mul+add)
+        //   accum += a2*b2
+        //   temp = accum + a1*b1
+        //   accum = a0*b0 + temp
+        v_accum = _mm_add_pd(v_accum, _mm_mul_pd(a3, b3));
+        v_accum = _mm_add_pd(v_accum, _mm_mul_pd(a2, b2));
+        __m128d t1 = _mm_add_pd(v_accum, _mm_mul_pd(a1, b1));
+        v_accum    = _mm_add_pd(_mm_mul_pd(a0, b0), t1);
+    }
+
+    // Tail loop: numpy-style load_tillz_f64
+    size_t remaining = n - i;
+    while (remaining > 0) {
+        __m128d va, vb;
+        if (remaining >= 2) {
+            va = _mm_loadu_pd(a + i);
+            vb = _mm_loadu_pd(b + i);
+            i += 2; remaining -= 2;
+        } else {
+            // remaining == 1: use movq (same as _mm_loadl_epi64)
+            va = _mm_castsi128_pd(_mm_loadl_epi64((const __m128i*)(a + i)));
+            vb = _mm_castsi128_pd(_mm_loadl_epi64((const __m128i*)(b + i)));
+            i += 1; remaining = 0;
+        }
+        v_accum = _mm_add_pd(v_accum, _mm_mul_pd(va, vb));
+    }
+
+    return _mm_cvtsd_f64(_mm_hadd_pd(v_accum, v_accum));
+}
+
+inline float einsum_reduce_f32(const float* a, const float* b, size_t n) {
+    __m128 v_accum = _mm_setzero_ps();
+    const int vstep = 4;
+    size_t i = 0;
+    const size_t vstepx4 = vstep * 4;  // 16
+
+    // 4x unrolled block — forward mul+add chain, exactly as numpy SSE
+    for (; i + vstepx4 <= n; i += vstepx4) {
+        __m128 a3 = _mm_loadu_ps(a + i + 12);
+        __m128 b3 = _mm_loadu_ps(b + i + 12);
+        __m128 a2 = _mm_loadu_ps(a + i + 8);
+        __m128 b2 = _mm_loadu_ps(b + i + 8);
+        __m128 a1 = _mm_loadu_ps(a + i + 4);
+        __m128 b1 = _mm_loadu_ps(b + i + 4);
+        __m128 a0 = _mm_loadu_ps(a + i);
+        __m128 b0 = _mm_loadu_ps(b + i);
+
+        // numpy's exact forward chain:
+        //   accum += a3*b3  (mul+add)
+        //   accum += a2*b2
+        //   temp = accum + a1*b1
+        //   accum = a0*b0 + temp
+        v_accum = _mm_add_ps(v_accum, _mm_mul_ps(a3, b3));
+        v_accum = _mm_add_ps(v_accum, _mm_mul_ps(a2, b2));
+        __m128 t1 = _mm_add_ps(v_accum, _mm_mul_ps(a1, b1));
+        v_accum    = _mm_add_ps(_mm_mul_ps(a0, b0), t1);
+    }
+
+    // Tail loop: numpy-style load_tillz_f32
+    size_t remaining = n - i;
+    while (remaining > 0) {
+        __m128 va, vb;
+        if (remaining >= 4) {
+            va = _mm_loadu_ps(a + i);
+            vb = _mm_loadu_ps(b + i);
+            i += 4; remaining -= 4;
+        } else if (remaining == 3) {
+            // numpy's exact load pattern for 3 elements:
+            // movq + movd + punpcklqdq
+            __m128i ta = _mm_loadl_epi64((const __m128i*)(a + i));
+            __m128i tb = _mm_loadl_epi64((const __m128i*)(b + i));
+            ta = _mm_insert_epi32(ta, ((const int*)(a + i))[2], 2);
+            tb = _mm_insert_epi32(tb, ((const int*)(b + i))[2], 2);
+            va = _mm_castsi128_ps(ta);
+            vb = _mm_castsi128_ps(tb);
+            i += 3; remaining = 0;
+        } else if (remaining == 2) {
+            // numpy: movq
+            va = _mm_castsi128_ps(_mm_loadl_epi64((const __m128i*)(a + i)));
+            vb = _mm_castsi128_ps(_mm_loadl_epi64((const __m128i*)(b + i)));
+            i += 2; remaining = 0;
+        } else { // remaining == 1
+            // numpy: movd
+            va = _mm_castsi128_ps(_mm_cvtsi32_si128(((const int*)(a + i))[0]));
+            vb = _mm_castsi128_ps(_mm_cvtsi32_si128(((const int*)(b + i))[0]));
+            i += 1; remaining = 0;
+        }
+        v_accum = _mm_add_ps(v_accum, _mm_mul_ps(va, vb));
+    }
+
+    // numpy: haddps(v,v); haddps(v,v)
+    __m128 sum_halves = _mm_hadd_ps(v_accum, v_accum);
+    return _mm_cvtss_f32(_mm_hadd_ps(sum_halves, sum_halves));
 }
 
 inline std::string implicit_output_labels(const std::vector<std::string>& il) {
@@ -158,7 +291,68 @@ void einsum(const std::string& subscripts,
     for (char c : output_labels)
         output_shape.push_back(label_size[c]);
 
-    // Iteration space
+    // ================================================================
+    // Fast path: single contraction label that is the LAST axis in
+    // BOTH operands (C-contiguous). Use BLAS dot per output element.
+    // ================================================================
+    if (sum_labels.size() == 1) {
+        char clabel = sum_labels[0];
+        ptrdiff_t csize = label_size[clabel];
+
+        int a_caxis = -1, b_caxis = -1;
+        for (const auto& [inp, ax] : label_axis[clabel]) {
+            if (inp == 0) a_caxis = ax;
+            if (inp == 1) b_caxis = ax;
+        }
+
+        if (a_caxis == ndim[0] - 1 && b_caxis == ndim[1] - 1 && csize > 0) {
+            auto a_str = compute_strides(shapes[0]);
+            auto b_str = compute_strides(shapes[1]);
+
+            // Map each output label to its axis in operands A and B.
+            // output_label → (a_axis_or_neg, b_axis_or_neg)
+            vector<pair<int, int>> out_label_axes;
+            for (char c : output_labels) {
+                int aa = -1, ba = -1;
+                for (const auto& [inp, ax] : label_axis[c]) {
+                    if (inp == 0) aa = ax;
+                    if (inp == 1) ba = ax;
+                }
+                out_label_axes.push_back({aa, ba});
+            }
+
+            ptrdiff_t output_total = 1;
+            for (ptrdiff_t s : output_shape) output_total *= s;
+
+            vector<ptrdiff_t> out_coord(output_shape.size(), 0);
+
+            for (ptrdiff_t oi = 0; oi < output_total; ++oi) {
+                ptrdiff_t rem = oi;
+                for (int d = static_cast<int>(output_shape.size()) - 1; d >= 0; --d) {
+                    out_coord[d] = rem % output_shape[d];
+                    rem /= output_shape[d];
+                }
+
+                ptrdiff_t a_off = 0, b_off = 0;
+                for (size_t d = 0; d < out_label_axes.size(); ++d) {
+                    int aa = out_label_axes[d].first;
+                    int ba = out_label_axes[d].second;
+                    if (aa >= 0) a_off += out_coord[d] * a_str[aa];
+                    if (ba >= 0) b_off += out_coord[d] * b_str[ba];
+                }
+
+                if constexpr (std::is_same_v<T, double>)
+                    result_ptr[oi] = einsum_reduce_f64(a_ptr + a_off, b_ptr + b_off, static_cast<size_t>(csize));
+                else
+                    result_ptr[oi] = einsum_reduce_f32(a_ptr + a_off, b_ptr + b_off, static_cast<size_t>(csize));
+            }
+            return;
+        }
+    }
+
+    // ================================================================
+    // Scalar path: general case.
+    // ================================================================
     vector<char> iter_labels = output_labels;
     iter_labels.insert(iter_labels.end(), sum_labels.begin(), sum_labels.end());
     int n_iter = static_cast<int>(iter_labels.size());
@@ -180,7 +374,6 @@ void einsum(const std::string& subscripts,
             iter_input_axis[li][inp] = ax;
     }
 
-    // Compute total output size for validation
     vector<ptrdiff_t> iter_coord(n_iter, 0);
     vector<ptrdiff_t> input_coord[2] = {
         vector<ptrdiff_t>(ndim[0], 0),

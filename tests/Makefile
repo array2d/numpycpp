@@ -6,7 +6,7 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -fPIC -ffp-contract=off \
 	-ffloat-store \
-	-mavx512f \
+	-mavx512f -mfma \
 	-fno-builtin-exp -fno-builtin-log -fno-builtin-sin \
 	-fno-builtin-cos -fno-builtin-tan -fno-builtin-pow \
 	-fno-builtin-sqrt -fno-builtin-atan2 -fno-builtin-log2 \

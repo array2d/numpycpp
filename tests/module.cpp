@@ -8,6 +8,7 @@
 #include "linalg_py.h"
 #include "einsum_py.h"
 #include "../numpy/svml_bridge.h"
+#include "../numpy/blas_bridge.h"
 
 namespace py = pybind11;
 
@@ -43,21 +44,24 @@ namespace py = pybind11;
 PYBIND11_MODULE(numpycpp, m) {
     m.doc() = "C++ pixel-level alignment of Python numpy, powered by Eigen";
 
-    // Initialize SVML bridge by locating numpy's _multiarray_umath.so
+    // Initialize SVML and BLAS bridges via numpy's _multiarray_umath.so.
+    // Both use dlsym on the same handle — BLAS symbols are found through
+    // transitive dependencies (OpenBLAS is linked against _multiarray_umath).
     try {
         py::module_ np_core = py::module_::import("numpy.core._multiarray_umath");
         std::string umath_path = np_core.attr("__file__").cast<std::string>();
         numpy::svml::bridge_init(umath_path.c_str());
+        numpy::blas::blas_init(umath_path.c_str());
     } catch (...) {
-        // SVML not available — fall back to libm (bit-exactness will vary)
+        // Fall back: SVML → libm, BLAS → sequential accumulation
     }
 
     // -- linalg submodule --------------------------------------------------
     py::module_ la = m.def_submodule("linalg", "numpy.linalg equivalents");
-    la.def("norm", static_cast<double(*)(const py::array_t<double>&)>(&numpy::linalg::norm));
     la.def("norm", static_cast<float(*)(const py::array_t<float>&)>(&numpy::linalg::norm));
-    la.def("norm", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
+    la.def("norm", static_cast<double(*)(const py::array_t<double>&)>(&numpy::linalg::norm));
     la.def("norm", static_cast<py::array_t<float>(*)(const py::array_t<float>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
+    la.def("norm", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
 
     // -- Array creation ----------------------------------------------------
     BIND_F1(zeros_like); BIND_F1(ones_like); BIND_F1(empty_like);
@@ -87,8 +91,8 @@ PYBIND11_MODULE(numpycpp, m) {
     BIND_F1(log10); BIND_F1(log2); BIND_F1(arcsin); BIND_F1(arccos); BIND_F1(arctan);
     BIND_F1(round); BIND_F1(floor); BIND_F1(ceil);
     BIND_F1(degrees); BIND_F1(radians); BIND_F1(sign);
-    m.def("power", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double)>(&numpy::power));
     m.def("power", static_cast<py::array_t<float>(*)(const py::array_t<float>&, float)>(&numpy::power));
+    m.def("power", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double)>(&numpy::power));
     m.def("clip", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double, double)>(&numpy::clip));
     m.def("clip", static_cast<py::array_t<float>(*)(const py::array_t<float>&, float, float)>(&numpy::clip));
 
@@ -167,8 +171,8 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("slice_assign", static_cast<void(*)(py::array_t<bool>, py::ssize_t, bool)>(&numpy::slice_assign));
 
     // -- Binary element-wise: scalar overloads BEFORE array-array ----------
-    m.def("arctan2", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double)>(&numpy::arctan2));
     m.def("arctan2", static_cast<py::array_t<float>(*)(const py::array_t<float>&, float)>(&numpy::arctan2));
+    m.def("arctan2", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double)>(&numpy::arctan2));
     m.def("arctan2", static_cast<py::array_t<double>(*)(const py::array_t<double>&, const py::array_t<double>&)>(&numpy::arctan2));
     m.def("arctan2", static_cast<py::array_t<float>(*)(const py::array_t<float>&, const py::array_t<float>&)>(&numpy::arctan2));
 
