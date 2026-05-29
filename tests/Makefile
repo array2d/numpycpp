@@ -4,7 +4,7 @@
 # Alignment: BIT-LEVEL — all tests verify bit-exact C++ vs numpy results.
 
 CXX      ?= g++
-CXXFLAGS ?= -std=c++17 -O2 -fPIC -ffp-contract=off \
+CXXFLAGS ?= -std=c++17 -O2 -fPIC -fopenmp -ffp-contract=off \
 	-ffloat-store \
 	-mavx512f -mfma \
 	-fno-builtin-exp -fno-builtin-log -fno-builtin-sin \
