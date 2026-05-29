@@ -7,6 +7,7 @@
 #include "core_py.h"
 #include "linalg_py.h"
 #include "einsum_py.h"
+#include "../numpy/svml_bridge.h"
 
 namespace py = pybind11;
 
@@ -42,12 +43,21 @@ namespace py = pybind11;
 PYBIND11_MODULE(numpycpp, m) {
     m.doc() = "C++ pixel-level alignment of Python numpy, powered by Eigen";
 
+    // Initialize SVML bridge by locating numpy's _multiarray_umath.so
+    try {
+        py::module_ np_core = py::module_::import("numpy.core._multiarray_umath");
+        std::string umath_path = np_core.attr("__file__").cast<std::string>();
+        numpy::svml::bridge_init(umath_path.c_str());
+    } catch (...) {
+        // SVML not available — fall back to libm (bit-exactness will vary)
+    }
+
     // -- linalg submodule --------------------------------------------------
     py::module_ la = m.def_submodule("linalg", "numpy.linalg equivalents");
     la.def("norm", static_cast<double(*)(const py::array_t<double>&)>(&numpy::linalg::norm));
     la.def("norm", static_cast<float(*)(const py::array_t<float>&)>(&numpy::linalg::norm));
     la.def("norm", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
-    la.def("norm", static_cast<py::array_t<double>(*)(const py::array_t<float>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
+    la.def("norm", static_cast<py::array_t<float>(*)(const py::array_t<float>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
 
     // -- Array creation ----------------------------------------------------
     BIND_F1(zeros_like); BIND_F1(ones_like); BIND_F1(empty_like);
@@ -90,10 +100,10 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("any", static_cast<bool(*)(const py::array_t<bool>&)>(&numpy::any));
     m.def("all", static_cast<bool(*)(const py::array_t<bool>&)>(&numpy::all));
 
-    // -- mean with axis (always returns double) ----------------------------
+    // -- mean with axis (preserves input dtype, matching numpy) -------------
     m.def("mean", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int)>(&numpy::mean),
           py::arg("arr"), py::arg("axis"));
-    m.def("mean", static_cast<py::array_t<double>(*)(const py::array_t<float>&,  int)>(&numpy::mean),
+    m.def("mean", static_cast<py::array_t<float>(*)(const py::array_t<float>&,  int)>(&numpy::mean),
           py::arg("arr"), py::arg("axis"));
 
     // -- Comparison --------------------------------------------------------
@@ -148,8 +158,11 @@ PYBIND11_MODULE(numpycpp, m) {
     BIND_F_MANIP1(take_cols);
 
     // -- Slice assignment ---------------------------------------------------
-    m.def("slice_assign", static_cast<void(*)(py::array_t<double>, py::ssize_t, double)>(&numpy::slice_assign));
+    // NOTE: float overload registered before double — ensures pybind11
+    // dispatches float32 arrays to the correct (in-place) overload instead
+    // of silently casting to double and mutating a temporary copy.
     m.def("slice_assign", static_cast<void(*)(py::array_t<float>,  py::ssize_t, float)>(&numpy::slice_assign));
+    m.def("slice_assign", static_cast<void(*)(py::array_t<double>, py::ssize_t, double)>(&numpy::slice_assign));
     m.def("slice_assign", static_cast<void(*)(py::array_t<int>,  py::ssize_t, int)>(&numpy::slice_assign));
     m.def("slice_assign", static_cast<void(*)(py::array_t<bool>, py::ssize_t, bool)>(&numpy::slice_assign));
 

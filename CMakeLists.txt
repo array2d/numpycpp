@@ -77,4 +77,4 @@ add_custom_target(deb
 message(STATUS "numpycpp v${PROJECT_VERSION}  (header-only C++ library)")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  DEB:  make deb  →  numpycpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb")
-message(STATUS "  Test: cd tests/ && make  →  build + run 336 tests")
+message(STATUS "  Test: cd tests/ && make  →  build + run bit-level alignment tests")

@@ -16,6 +16,8 @@
 #include <cstddef>
 #include <stdexcept>
 
+#include "svml_bridge.h"
+
 namespace numpy {
 
 // ============================================================================
@@ -59,37 +61,37 @@ inline void abs(const T* src, T* dst, size_t n) {
 /// numpy.exp(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void exp(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::exp(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::exp(src[i]);
 }
 
 /// numpy.log(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void log(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::log(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::log(src[i]);
 }
 
 /// numpy.sin(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void sin(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::sin(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::sin(src[i]);
 }
 
 /// numpy.cos(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void cos(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::cos(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::cos(src[i]);
 }
 
 /// numpy.tan(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void tan(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::tan(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::tan(src[i]);
 }
 
 /// numpy.power(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
 inline void power(const T* src, T* dst, size_t n, T exponent) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::pow(src[i], exponent);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::pow(src[i], exponent);
 }
 
 /// numpy.clip(a, a_min, a_max, out=None, **kwargs)
@@ -102,31 +104,31 @@ inline void clip(const T* src, T* dst, size_t n, T min_val, T max_val) {
 /// numpy.log10(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void log10(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::log10(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::log10(src[i]);
 }
 
 /// numpy.log2(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void log2(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::log2(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::log2(src[i]);
 }
 
 /// numpy.arcsin(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void arcsin(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::asin(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::asin(src[i]);
 }
 
 /// numpy.arccos(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void arccos(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::acos(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::acos(src[i]);
 }
 
 /// numpy.arctan(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void arctan(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::atan(src[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::atan(src[i]);
 }
 
 /// numpy.round(a, decimals=0, out=None)
@@ -148,15 +150,19 @@ inline void ceil(const T* src, T* dst, size_t n) {
 }
 
 /// numpy.degrees(x, /, out=None, *, where=True, ...)
+//  Must use native-type division to match numpy's compute path:
+//  numpy does float32(180.0) / float32(pi), NOT float32(double(180) / double(pi)).
 template<typename T>
 inline void degrees(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = src[i] * T(180.0 / M_PI);
+    T factor = T(180.0) / T(M_PI);
+    for (size_t i = 0; i < n; ++i) dst[i] = src[i] * factor;
 }
 
 /// numpy.radians(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void radians(const T* src, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = src[i] * T(M_PI / 180.0);
+    T factor = T(M_PI) / T(180.0);
+    for (size_t i = 0; i < n; ++i) dst[i] = src[i] * factor;
 }
 
 /// numpy.sign(x, /, out=None, *, where=True, ...)
@@ -166,22 +172,66 @@ inline void sign(const T* src, T* dst, size_t n) {
 }
 
 // ============================================================================
+// Pairwise summation — matches numpy's accumulation order exactly
+// ============================================================================
+
+/// Pairwise summation of type T values (numpy's reduction algorithm).
+/// Recursively splits, 8-accumulator unrolled for medium sizes,
+/// simple sequential for base case (n < 8).
+/// Start with -0.0 to preserve negative zero (matching numpy).
+template<typename T>
+inline T pairwise_sum(const T* data, size_t n) {
+    if (n == 0) return T(0);
+    if (n < 8) {
+        T res = T(-0.0);
+        for (size_t i = 0; i < n; ++i) res += data[i];
+        return res;
+    }
+    if (n <= 128) {
+        T r[8];
+        size_t i = 0;
+        for (; i < 8 && i < n; ++i) r[i] = data[i];
+        for (; i + 7 < n; i += 8) {
+            r[0] += data[i + 0];
+            r[1] += data[i + 1];
+            r[2] += data[i + 2];
+            r[3] += data[i + 3];
+            r[4] += data[i + 4];
+            r[5] += data[i + 5];
+            r[6] += data[i + 6];
+            r[7] += data[i + 7];
+        }
+        // numpy's exact combining order: ((r0+r1)+(r2+r3)) + ((r4+r5)+(r6+r7))
+        T res = ((r[0] + r[1]) + (r[2] + r[3])) +
+                ((r[4] + r[5]) + (r[6] + r[7]));
+        for (; i < n; ++i) res += data[i];
+        return res;
+    }
+    // recursive split — ensure multiple of 8 (matching numpy)
+    size_t n2 = n / 2;
+    n2 -= n2 % 8;
+    return pairwise_sum(data, n2) +
+           pairwise_sum(data + n2, n - n2);
+}
+
+// ============================================================================
 // Reduction — T in → T out
 // ============================================================================
 
 /// numpy.sum(a, axis=None, dtype=None, out=None, keepdims=False, ...)
+//  Accumulation matches input dtype (matching numpy: float32 stays float32).
+//  Uses numpy's pairwise summation algorithm for exact bit-level alignment.
 template<typename T>
 inline T sum(const T* data, size_t n) {
-    T total = T(0);
-    for (size_t i = 0; i < n; ++i) total += data[i];
-    return total;
+    return pairwise_sum(data, n);
 }
 
 /// numpy.mean(a, axis=None, dtype=None, out=None, keepdims=False, *)
 template<typename T>
 inline T mean(const T* data, size_t n) {
     if (n == 0) return T(0);
-    return sum(data, n) / static_cast<T>(n);
+    T s = pairwise_sum(data, n);
+    return s / static_cast<T>(n);
 }
 
 /// numpy.max(a, axis=None, out=None, keepdims=False, initial=..., where=...)
@@ -224,11 +274,12 @@ template<typename T>
 inline T stddev(const T* data, size_t n) {
     if (n == 0) return T(0);
     T m = mean(data, n);
-    T sum_sq = T(0);
+    std::vector<T> diffs(n);
     for (size_t i = 0; i < n; ++i) {
         T diff = data[i] - m;
-        sum_sq += diff * diff;
+        diffs[i] = diff * diff;
     }
+    T sum_sq = pairwise_sum(diffs.data(), n);
     return std::sqrt(sum_sq / static_cast<T>(n));
 }
 
@@ -237,11 +288,12 @@ template<typename T>
 inline T var(const T* data, size_t n) {
     if (n == 0) return T(0);
     T m = mean(data, n);
-    T sum_sq = T(0);
+    std::vector<T> diffs(n);
     for (size_t i = 0; i < n; ++i) {
         T diff = data[i] - m;
-        sum_sq += diff * diff;
+        diffs[i] = diff * diff;
     }
+    T sum_sq = pairwise_sum(diffs.data(), n);
     return sum_sq / static_cast<T>(n);
 }
 
@@ -350,13 +402,13 @@ inline void isfinite(const T* src, bool* dst, size_t n) {
 /// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 inline void arctan2_array(const T* a, const T* b, T* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::atan2(a[i], b[i]);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::atan2(a[i], b[i]);
 }
 
 /// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-scalar
 template<typename T>
 inline void arctan2_scalar(const T* src, T* dst, size_t n, T b) {
-    for (size_t i = 0; i < n; ++i) dst[i] = std::atan2(src[i], b);
+    for (size_t i = 0; i < n; ++i) dst[i] = svml::atan2(src[i], b);
 }
 
 /// numpy.maximum(x1, x2, /, out=None, *, where=True, ...) — array-array
@@ -673,9 +725,9 @@ inline void truncate_to_float32(const double* src, double* dst, size_t n) {
 // mean_axis: T in → double out (matching numpy dtype promotion)
 // ============================================================================
 
-/// ndarray.mean(axis=N) — N-D, T in → double out (numpy dtype promotion)
+/// ndarray.mean(axis=N) — N-D, T in → T out (matches numpy: preserves input dtype)
 template<typename T>
-inline void mean_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndim, int axis) {
+inline void mean_axis(const T* src, T* dst, const ptrdiff_t* shape, int ndim, int axis) {
     if (ndim == 0) return;
     if (axis < 0) axis += ndim;
     ptrdiff_t axis_size = shape[axis];
@@ -702,6 +754,9 @@ inline void mean_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndi
     for (int d = ndim - 2; d >= 0; --d)
         out_stride[d] = out_stride[d + 1] * out_shape[d + 1];
 
+    // Temporary buffer for pairwise sum along fiber
+    std::vector<T> fiber_buf(static_cast<size_t>(axis_size));
+
     for (ptrdiff_t f = 0; f < n_fibers; ++f) {
         ptrdiff_t rem = f;
         ptrdiff_t in_base = 0, out_base = 0;
@@ -713,10 +768,11 @@ inline void mean_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndi
             out_base += idx * out_stride[d];
         }
 
-        double sum = 0.0;
         for (ptrdiff_t i = 0; i < axis_size; ++i)
-            sum += static_cast<double>(src[in_base + i * axis_stride]);
-        dst[out_base] = sum / static_cast<double>(axis_size);
+            fiber_buf[static_cast<size_t>(i)] = src[in_base + i * axis_stride];
+
+        T sum = pairwise_sum(fiber_buf.data(), static_cast<size_t>(axis_size));
+        dst[out_base] = sum / static_cast<T>(axis_size);
     }
 }
 
@@ -727,22 +783,26 @@ inline void mean_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndi
 /// squared L2 norm (internal helper for linalg.norm)
 template<typename T>
 inline T norm_sq(const T* data, size_t n) {
-    T s = T(0);
-    for (size_t i = 0; i < n; ++i) s += data[i] * data[i];
-    return s;
+    std::vector<T> squares(n);
+    for (size_t i = 0; i < n; ++i) {
+        T v = data[i];
+        squares[i] = v * v;
+    }
+    return pairwise_sum(squares.data(), n);
 }
 
 /// numpy.dot(a, b, out=None) — 1D vector dot product
 template<typename T>
 inline T dot(const T* a, const T* b, size_t n) {
-    T s = T(0);
-    for (size_t i = 0; i < n; ++i) s += a[i] * b[i];
-    return s;
+    std::vector<T> products(n);
+    for (size_t i = 0; i < n; ++i)
+        products[i] = a[i] * b[i];
+    return pairwise_sum(products.data(), n);
 }
 
 /// numpy.linalg.norm(x, ord=None, axis=N, keepdims=False) — N-D
 template<typename T>
-inline void norm_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndim, int axis) {
+inline void norm_axis(const T* src, T* dst, const ptrdiff_t* shape, int ndim, int axis) {
     if (ndim == 0) return;
     if (axis < 0) axis += ndim;
     ptrdiff_t axis_size = shape[axis];
@@ -769,6 +829,9 @@ inline void norm_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndi
     for (int d = ndim - 2; d >= 0; --d)
         out_stride[d] = out_stride[d + 1] * out_shape[d + 1];
 
+    // Temporary buffer for pairwise sum along fiber
+    std::vector<T> fiber_buf(static_cast<size_t>(axis_size));
+
     for (ptrdiff_t f = 0; f < n_fibers; ++f) {
         ptrdiff_t rem = f;
         ptrdiff_t in_base = 0, out_base = 0;
@@ -780,11 +843,11 @@ inline void norm_axis(const T* src, double* dst, const ptrdiff_t* shape, int ndi
             out_base += idx * out_stride[d];
         }
 
-        double sum = 0.0;
         for (ptrdiff_t i = 0; i < axis_size; ++i) {
-            double v = static_cast<double>(src[in_base + i * axis_stride]);
-            sum += v * v;
+            T v = src[in_base + i * axis_stride];
+            fiber_buf[static_cast<size_t>(i)] = v * v;
         }
+        T sum = pairwise_sum(fiber_buf.data(), static_cast<size_t>(axis_size));
         dst[out_base] = std::sqrt(sum);
     }
 }

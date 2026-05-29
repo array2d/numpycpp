@@ -486,7 +486,7 @@ py::array_t<T> flatten(const py::array_t<T>& arr) {
 
 /// numpy.mean(a, axis=..., dtype=None, out=None, keepdims=False, *) — N-D
 template<typename T>
-py::array_t<double> mean_axis(const py::array_t<T>& arr, int axis) {
+py::array_t<T> mean_axis(const py::array_t<T>& arr, int axis) {
     auto buf = arr.request();
     if (buf.ndim < 1) throw std::invalid_argument("Array must have at least 1 dimension");
 
@@ -501,9 +501,9 @@ py::array_t<double> mean_axis(const py::array_t<T>& arr, int axis) {
     if (out_shape.empty()) out_shape.push_back(1);
 
     std::vector<py::ssize_t> py_out_shape(out_shape.begin(), out_shape.end());
-    py::array_t<double> result(py_out_shape);
+    py::array_t<T> result(py_out_shape);
     mean_axis(static_cast<const T*>(buf.ptr),
-                     static_cast<double*>(result.request().ptr),
+                     static_cast<T*>(result.request().ptr),
                      shape.data(), static_cast<int>(buf.ndim), ax);
     return result;
 }
@@ -511,7 +511,7 @@ py::array_t<double> mean_axis(const py::array_t<T>& arr, int axis) {
 /// numpy.mean(a, axis=..., ...) — float64
 inline py::array_t<double> mean(const py::array_t<double>& arr, int axis) { return mean_axis(arr, axis); }
 /// numpy.mean(a, axis=..., ...) — float32
-inline py::array_t<double> mean(const py::array_t<float>& arr, int axis)  { return mean_axis(arr, axis); }
+inline py::array_t<float> mean(const py::array_t<float>& arr, int axis)  { return mean_axis(arr, axis); }
 
 // ============================================================================
 // to_vector — utility

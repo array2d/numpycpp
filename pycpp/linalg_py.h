@@ -20,7 +20,7 @@ T norm(const py::array_t<T>& arr) {
 
 /// numpy.linalg.norm(x, ord=None, axis=N, keepdims=False) — N-D with axis
 template<typename T>
-py::array_t<double> norm(const py::array_t<T>& arr, int axis = -1) {
+py::array_t<T> norm(const py::array_t<T>& arr, int axis = -1) {
     auto buf = arr.request();
     int ndim = static_cast<int>(buf.ndim);
     int ax = (axis == -1) ? ndim - 1 : axis;
@@ -34,9 +34,9 @@ py::array_t<double> norm(const py::array_t<T>& arr, int axis = -1) {
     if (out_shape.empty()) out_shape.push_back(1);
 
     std::vector<py::ssize_t> py_out_shape(out_shape.begin(), out_shape.end());
-    py::array_t<double> result(py_out_shape);
+    py::array_t<T> result(py_out_shape);
     numpy::norm_axis(static_cast<const T*>(buf.ptr),
-                            static_cast<double*>(result.request().ptr),
+                            static_cast<T*>(result.request().ptr),
                             shape.data(), ndim, ax);
     return result;
 }
