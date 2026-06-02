@@ -430,6 +430,11 @@ def test_zeros(shape, cpp):
 def test_ones(shape, cpp):
     assert_bit_aligned(cpp.ones(shape), np.ones(shape), f"ones{shape}")
 
+@pytest.mark.parametrize("shape,fill_val", [((5,), 3.14), ((2, 3), -1.0), ((4,), 0.0)])
+def test_full(shape, fill_val, cpp):
+    assert_bit_aligned(cpp.full(list(shape), fill_val),
+                       np.full(shape, fill_val), f"full{shape}_{fill_val}")
+
 
 # ============================================================================
 # 7. Bool-specialized creation
@@ -687,6 +692,23 @@ def test_argmin(cpp, dtype):
 def test_isin(cpp):
     a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
     assert_bit_aligned(cpp.isin(a, [2.0, 4.0, 6.0]), np.isin(a, [2.0, 4.0, 6.0]), "isin")
+
+def test_isin_int(cpp):
+    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    assert_bit_aligned(cpp.isin(a, [2, 4, 6]), np.isin(a, [2, 4, 6]), "isin_int")
+
+def test_flatnonzero(cpp):
+    a = np.array([0.0, 1.0, 0.0, 2.0, 0.0, 3.0])
+    assert_bit_aligned(cpp.flatnonzero(a), np.flatnonzero(a), "flatnonzero")
+    # all zeros
+    a2 = np.array([0.0, 0.0, 0.0])
+    assert_bit_aligned(cpp.flatnonzero(a2), np.flatnonzero(a2), "flatnonzero zeros")
+
+def test_unwrap(cpp):
+    a = np.array([0.0, 0.5, 0.8, -0.9, -0.5, 0.2])
+    assert_bit_aligned(cpp.unwrap(a), np.unwrap(a), "unwrap")
+    a2 = np.array([0.0, 2.5, 5.0, -2.5, -5.0]) * np.pi
+    assert_bit_aligned(cpp.unwrap(a2), np.unwrap(a2), "unwrap_large")
 
 def test_intersect1d(cpp):
     a, b = np.array([1.0, 2.0, 3.0, 4.0]), np.array([3.0, 4.0, 5.0, 6.0])

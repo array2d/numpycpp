@@ -70,6 +70,7 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("ones_like_bool", &numpy::ones_like_bool);
     m.def("zeros", &numpy::zeros);
     m.def("ones", &numpy::ones);
+	m.def("full", static_cast<py::array_t<double>(*)(const std::vector<py::ssize_t>&, double)>(&numpy::full));
 
     // -- astype ------------------------------------------------------------
     // NOTE: astype_int / astype_bool / astype_bool_from_int instead of a
@@ -213,7 +214,10 @@ PYBIND11_MODULE(numpycpp, m) {
 
     // -- Set operations ----------------------------------------------------
     m.def("isin", static_cast<py::array_t<bool>(*)(const py::array_t<double>&, const std::vector<double>&)>(&numpy::isin));
+	m.def("isin", static_cast<py::array_t<bool>(*)(const py::array_t<double>&, const std::vector<int>&)>(&numpy::isin));
     m.def("intersect1d", static_cast<py::array_t<double>(*)(const py::array_t<double>&, const py::array_t<double>&)>(&numpy::intersect1d));
+	m.def("flatnonzero", static_cast<py::array_t<py::ssize_t>(*)(const py::array_t<double>&)>(&numpy::flatnonzero));
+	m.def("unwrap", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double)>(&numpy::unwrap), py::arg("arr"), py::arg("discont") = M_PI);
 
     // -- Interpolation -----------------------------------------------------
     m.def("interp", static_cast<py::array_t<double>(*)(const py::array_t<double>&, const py::array_t<double>&, const py::array_t<double>&)>(&numpy::interp));

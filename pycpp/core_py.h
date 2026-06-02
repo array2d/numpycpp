@@ -43,7 +43,7 @@ template<typename T>
 py::array_t<T> full_like(const py::array_t<T>& arr, T fill_value) {
     auto buf = arr.request();
     py::array_t<T> result(buf.shape);
-    full_like(static_cast<T*>(result.request().ptr), buf.size, fill_value);
+    numpy::full(static_cast<T*>(result.request().ptr), buf.size, fill_value);
     return result;
 }
 
@@ -64,6 +64,13 @@ inline py::array_t<double> zeros(const std::vector<py::ssize_t>& shape) {
 inline py::array_t<double> ones(const std::vector<py::ssize_t>& shape) {
     py::array_t<double> result(shape);
     ones_like(static_cast<double*>(result.request().ptr), result.request().size);
+    return result;
+}
+
+/// numpy.full(shape, fill_value, dtype=float, order='C')
+inline py::array_t<double> full(const std::vector<py::ssize_t>& shape, double fill_value) {
+    py::array_t<double> result(shape);
+    numpy::full(static_cast<double*>(result.request().ptr), result.request().size, fill_value);
     return result;
 }
 
@@ -870,9 +877,39 @@ py::ssize_t argmin(const py::array_t<T>& arr) {
 inline py::array_t<bool> isin(const py::array_t<double>& arr, const std::vector<double>& values) {
     auto buf = arr.request();
     py::array_t<bool> result(buf.shape);
-    isin(static_cast<const double*>(buf.ptr),
+    numpy::isin(static_cast<const double*>(buf.ptr),
                 static_cast<bool*>(result.request().ptr), buf.size,
                 values.data(), values.size());
+    return result;
+}
+
+/// isin with int test_elements (e.g. np.isin(arr, [1, 3, 5]))
+inline py::array_t<bool> isin(const py::array_t<double>& arr, const std::vector<int>& values) {
+    auto buf = arr.request();
+    py::array_t<bool> result(buf.shape);
+    std::vector<double> dv(values.begin(), values.end());
+    numpy::isin(static_cast<const double*>(buf.ptr),
+                static_cast<bool*>(result.request().ptr), buf.size,
+                dv.data(), dv.size());
+    return result;
+}
+
+/// numpy.flatnonzero(a)
+inline py::array_t<py::ssize_t> flatnonzero(const py::array_t<double>& arr) {
+    auto buf = arr.request();
+    auto idx = numpy::flatnonzero(static_cast<const double*>(buf.ptr), buf.size);
+    py::array_t<py::ssize_t> result(idx.size());
+    std::copy(idx.begin(), idx.end(),
+              static_cast<py::ssize_t*>(result.request().ptr));
+    return result;
+}
+
+/// numpy.unwrap(p, discont=None, axis=-1) — 1D only
+inline py::array_t<double> unwrap(const py::array_t<double>& arr, double discont = M_PI) {
+    auto buf = arr.request();
+    py::array_t<double> result(buf.shape);
+    numpy::unwrap(static_cast<const double*>(buf.ptr),
+                  static_cast<double*>(result.request().ptr), buf.size, discont);
     return result;
 }
 

@@ -45,9 +45,9 @@ inline void ones_like(T* dst, size_t n) {
     std::fill_n(dst, n, T(1));
 }
 
-/// numpy.full_like(a, fill_value, dtype=None, order='K', subok=True, shape=None)
+/// numpy.full(shape, fill_value, dtype=None, order='C')
 template<typename T>
-inline void full_like(T* dst, size_t n, T fill_value) {
+inline void full(T* dst, size_t n, T fill_value) {
     std::fill_n(dst, n, fill_value);
 }
 
@@ -662,18 +662,29 @@ inline ptrdiff_t argmin(const T* data, size_t n) {
 // ============================================================================
 
 /// numpy.isin(element, test_elements, assume_unique=False, invert=False)
-inline void isin(const double* arr, bool* dst, size_t n,
-                  const double* values, size_t nv) {
-    std::unordered_set<double> vs(values, values + nv);
+template<typename T>
+inline void isin(const T* arr, bool* dst, size_t n,
+                  const T* values, size_t nv) {
+    std::unordered_set<T> vs(values, values + nv);
     for (size_t i = 0; i < n; ++i) dst[i] = vs.count(arr[i]) > 0;
 }
 
+/// numpy.flatnonzero(a)
+template<typename T>
+inline std::vector<size_t> flatnonzero(const T* arr, size_t n) {
+    std::vector<size_t> idx;
+    for (size_t i = 0; i < n; ++i)
+        if (arr[i] != T(0)) idx.push_back(i);
+    return idx;
+}
+
 /// numpy.intersect1d(ar1, ar2, assume_unique=False, return_indices=False)
-inline std::vector<double> intersect1d(const double* a, size_t na,
-                                        const double* b, size_t nb) {
-    std::unordered_set<double> sa(a, a + na), sb(b, b + nb);
-    std::vector<double> inter;
-    for (double v : sa)
+template<typename T>
+inline std::vector<T> intersect1d(const T* a, size_t na,
+                                   const T* b, size_t nb) {
+    std::unordered_set<T> sa(a, a + na), sb(b, b + nb);
+    std::vector<T> inter;
+    for (T v : sa)
         if (sb.count(v)) inter.push_back(v);
     return inter;
 }
@@ -705,6 +716,26 @@ inline void interp(const double* x, double* dst, size_t nx,
 /// safe_divide(a, b, default_val=0.0): returns a/b, or default_val if b == 0
 inline double safe_divide(double a, double b, double default_val = 0.0) {
     return b == 0.0 ? default_val : a / b;
+}
+
+/// numpy.unwrap(p, discont=None, axis=-1)
+/// 1D only: unwrap phase angles by correcting jumps > discont.
+template<typename T>
+inline void unwrap(const T* src, T* dst, size_t n, T discont = T(M_PI)) {
+    if (n == 0) return;
+    T period = T(2) * discont;
+    dst[0] = src[0];
+    T cum_correct = T(0);
+    for (size_t i = 1; i < n; ++i) {
+        T dd = src[i] - src[i - 1];
+        T ph_correct = T(0);
+        if (std::abs(dd) >= discont) {
+            T ddmod = dd - std::round(dd / period) * period;
+            ph_correct = ddmod - dd;
+        }
+        cum_correct += ph_correct;
+        dst[i] = src[i] + cum_correct;
+    }
 }
 
 // ============================================================================
