@@ -158,7 +158,7 @@ inline void arctan(const T* src, T* dst, size_t n) {
 /// numpy.round(a, decimals=0, out=None)
 template<typename T>
 inline void round(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = std::round(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = std::nearbyint(src[i]));
 }
 
 /// numpy.floor(x, /, out=None, *, where=True, ...)
