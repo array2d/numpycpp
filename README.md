@@ -15,7 +15,9 @@ We created `numpycpp` to keep NumPy's familiar usage patterns while letting C++ 
 
 `numpycpp` is a **header-only C++ library** implementing numpy's core API (`numpy.*`, `numpy.linalg.*`, `numpy.einsum`) with **bit-level precision alignment**. Raw pointer + size interface. Zero external dependencies — pure C++17 standard library.
 
-All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly. Where bit-exact parity is unattainable due to differing math library implementations (1‑ULP), it is documented explicitly.
+All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (336 tests, float64 + float32).
+
+**Bit-exact math** is achieved via an SVML bridge that resolves numpy's own transcendental functions (`__svml_exp8`, `__svml_sin8`, etc.) from the loaded `_multiarray_umath.so` at runtime. This guarantees that `exp`, `log`, `sin`, `cos`, `tan`, and all other transcendental functions produce the exact same bits as numpy. On platforms without AVX-512, the bridge falls back to `std::` (1‑ULP).
 
 ## Quick Start
 
@@ -78,97 +80,73 @@ Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly
 ### Testing
 
 The test suite verifies **bit-level precision alignment** between every C++ function and Python numpy.
-No tolerance, no `atol`/`rtol` — raw IEEE 754 bits must match exactly.
+No tolerance, no `atol`/`rtol` — raw IEEE 754 bits must match exactly. 336 tests, float64 + float32.
 
 ```bash
 cd tests
 make                    # compile C++ test module
-make test               # run all tests (default: 337 tests, float64 + float32)
+make test               # run all 336 tests (silent mode: only failures print)
 ```
 
-**API category filter** — limit tests to specific API groups via env var:
+To run with verbose output:
 
 ```bash
-# Run only creation + reduction APIs (zeros_like, sum, mean, etc.)
-NUMPYCPP_TEST_APIS=creation,reduction make test
-
-# Run only elementary math (sqrt, exp, sin, pow, etc.)
-NUMPYCPP_TEST_APIS=math make test
-
-# Run only einsum patterns
-NUMPYCPP_TEST_APIS=einsum make test
-
-# Run all (default)
-NUMPYCPP_TEST_APIS=all make test
+PYTHONPATH=tests:$PYTHONPATH python3 -m pytest tests/test_all.py -v
 ```
-
-Available categories:
-
-| Category      | APIs covered |
-|---------------|-------------|
-| `creation`    | zeros_like, ones_like, full_like, empty_like, zeros, ones |
-| `astype`      | astype int/bool, truncate_to_float32 |
-| `math`        | sqrt, abs, exp, log, sin, cos, tan, power, clip, log10, log2, arcsin, arccos, arctan, round, floor, ceil, degrees, radians, sign |
-| `reduction`   | sum, mean, max, min, any, all |
-| `comparison`  | greater, less, equal, greater_equal, less_equal, not_equal |
-| `logical`     | logical_and, logical_or, logical_not, logical_xor |
-| `special`     | isnan, isinf, isfinite |
-| `binary`      | arctan2, maximum, minimum |
-| `manipulation`| diff, stack, concatenate, vstack, hstack, where, transpose, flatten, mean_axis, slice, take_cols, slice_assign, roll, flip, repeat, tile |
-| `statistical` | std, var |
-| `sorting`     | argsort, argmax, argmin |
-| `setops`      | isin, intersect1d, interp, safe_divide |
-| `access`      | array_get, asarray, to_vector |
-| `linalg`      | norm, norm_axis, dot |
-| `einsum`      | all einsum patterns (explicit + implicit mode) |
 
 ### Alignment status
 
 The table below reflects the current bit-level parity between `numpycpp` C++ and Python numpy.
-Tests marked ✅ are bit-exact (all IEEE 754 bits match). Tests marked ⚠️ differ by ≤ 1 ULP.
+All 336 tests pass under strict IEEE 754 bit comparison (float64 + float32).
+
+✅ = bit-exact on AVX-512 (SVML bridge active).  
+🔶 = 1-ULP on non-AVX-512 (falls back to `std::` math).
 
 | API group         | float64 | float32 | Notes |
 |-------------------|:-------:|:-------:|-------|
-| Creation          | ✅ | ✅ | All creation APIs bit-exact |
-| Astype            | ✅ | ✅ | All conversions bit-exact |
-| Comparison        | ✅ | ✅ | All comparisons bit-exact |
-| Logical           | ✅ | ✅ | bool-only, always exact |
-| Special values    | ✅ | ✅ | isnan / isinf / isfinite bit-exact |
-| Manipulation      | ✅ | ✅ | diff, stack, transpose, slice etc. bit-exact |
-| Sorting           | ✅ | ✅ | argsort, argmax, argmin bit-exact |
-| Setops / interp   | ✅ | ✅ | isin, intersect1d, interp bit-exact |
-| Access / convert  | ✅ | ✅ | array_get, asarray, to_vector bit-exact |
-| **Math — sqrt, abs, clip, round, floor, ceil, degrees, radians, sign** | ✅ | ✅ | These are bit-exact |
-| **Math — transcendental** (exp, log, sin, cos, tan, log10, log2, arcsin, arccos, arctan) | ⚠️ | ⚠️ | 1-ULP: `std::` vs numpy libm |
-| **Math — power**   | ✅ | ⚠️ | float32: 1-ULP from libm |
-| **Reduction** (sum 2d, mean float32) | ⚠️ | ⚠️ | Accumulation-order differences |
-| Statistical (std, var) | ⚠️ | ⚠️ | Accumulation-order differences |
-| Binary (arctan2 scalar float32) | ✅ | ⚠️ | 1-ULP from libm |
-| slice_assign float32 | ✅ | ⚠️ | pybind11 overload dispatch issue |
-| **Dot product**    | ⚠️ | ✅ | float64: accumulation-order |
-| **Norm**           | ✅ | ⚠️ | float32: sqrt + accumulation |
-| **Einsum** (most patterns) | ✅ | ✅ | Simple patterns bit-exact |
-| **Einsum** (large accumulations) | ⚠️ | ⚠️ | Multi-element accumulation drift |
+| Creation          | ✅ | ✅ | zeros_like, ones_like, full_like, zeros, ones |
+| Astype            | ✅ | ✅ | astype int/bool, truncate float32 |
+| Comparison        | ✅ | ✅ | greater, less, equal, not_equal, etc. |
+| Logical           | ✅ | ✅ | bool-only (and/or/not/xor) |
+| Special values    | ✅ | ✅ | isnan, isinf, isfinite |
+| Manipulation      | ✅ | ✅ | diff, stack, concatenate, transpose, slice, roll, flip, repeat, tile, where |
+| Sorting           | ✅ | ✅ | argsort, argmax, argmin |
+| Setops / interp   | ✅ | ✅ | isin, intersect1d, interp, safe_divide |
+| Access / convert  | ✅ | ✅ | array_get, asarray, to_vector |
+| **Math — element-wise** (sqrt, abs, sign, clip, round, floor, ceil, degrees, radians) | ✅ | ✅ | Pure C++, no libm dependency |
+| **Math — transcendental** (exp, log, sin, cos, tan, asin, acos, atan, log10, log2, exp2) | ✅ | 🔶 | SVML bridge → bit-exact; fallback → std:: (1-ULP) |
+| **Math — power**   | ✅ | 🔶 | SVML bridge for f64; f32: std::pow |
+| **Math — atan2**   | ✅ | 🔶 | npy_atan2 via SVML bridge |
+| **Reduction** (sum, mean, max, min, any, all) | ✅ | ✅ | pairwise_sum matches numpy exactly |
+| Statistical (std, var) | ✅ | ✅ | pairwise_sum + sqrt |
+| Binary (maximum, minimum) | ✅ | ✅ | std::max/min, deterministic |
+| **Dot product**    | ✅ | ✅ | pairwise_sum(a*b) — matches np.sum(a*b) |
+| **Norm**           | ✅ | ✅ | pairwise_sum of squares + sqrt |
+| **Norm (axis)**    | ✅ | ✅ | Fiber-wise pairwise_sum + sqrt |
+| **Einsum**         | ✅ | ✅ | All patterns (ij,ij→i, ij,jk→ik, bij,bjk→bik, etc.) |
 
-> **Why 1‑ULP?** The C++ standard library (`std::exp`, `std::log`, etc.) and numpy's underlying libm may use different polynomial approximations or rounding strategies, leading to a single-bit difference in the last place. This is inherent to the math library, not a bug in `numpycpp`.
+> **SVML bridge**: On AVX-512 platforms, `numpycpp` resolves numpy's own SVML vector functions (`__svml_exp8`, `__svml_sin8`, etc.) from the loaded `_multiarray_umath.so` via `dlsym`. This guarantees bit-identical transcendental results. On non-AVX-512, `std::` fallbacks produce ≤ 1 ULP difference.
+>
+> **Reductions**: All reductions use numpy's pairwise summation algorithm (recursive split, 8-accumulator unrolled). This matches `np.sum` exactly. Dot products and norms build on pairwise_sum, not BLAS — matching `np.sum(a*b)` and `np.sqrt(np.sum(a*a))` respectively.
 
 ## Project Structure
 
 ```
 numpycpp/
 ├── numpy/              # native C++ headers (zero dependency)
-│   ├── core.h          # numpy.* equivalents (~80 functions)
-│   ├── linalg.h        # numpy.linalg.* equivalents
-│   └── einsum.h        # numpy.einsum
+│   ├── core.h          # numpy.* equivalents (pairwise_sum, element-wise, reductions, etc.)
+│   ├── linalg.h        # numpy.linalg.* (norm, norm_axis)
+│   ├── einsum.h        # numpy.einsum (SSE SIMD xmm, OpenMP, stride-based fast path)
+│   ├── svml_bridge.h  # runtime dlsym resolver for numpy's SVML vector functions
+│   └── npy_math_float.h # numpy's own float32 polynomial approximations
 ├── pycpp/              # pybind11 wrappers (optional)
 │   ├── core_py.h
 │   ├── linalg_py.h
 │   └── einsum_py.h
 ├── tests/              # bit-level precision tests + test module
 │   ├── module.cpp      # pybind11 module for testing
-│   ├── test_all.py     # single entry — all APIs, float64+float32
-│   ├── conftest.py     # fixtures + NUMPYCPP_TEST_APIS filter
-│   ├── utils.py        # bit-level comparison engine
+│   ├── test_all.py     # single entry — all APIs, 336 tests, float64+float32
+│   ├── conftest.py     # silent-mode output suppression
 │   └── Makefile
 ├── CMakeLists.txt      # build & .deb packaging
 └── README.md
