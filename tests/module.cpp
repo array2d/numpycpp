@@ -239,13 +239,4 @@ PYBIND11_MODULE(numpycpp, m) {
     // -- Einsum ------------------------------------------------------------
     m.def("einsum", static_cast<py::array_t<double>(*)(const std::string&, const py::array_t<double>&, const py::array_t<double>&)>(&numpy::einsum));
     m.def("einsum", static_cast<py::array_t<float>(*)(const std::string&, const py::array_t<float>&, const py::array_t<float>&)>(&numpy::einsum));
-
-	// -- Compile-time capability detection -------------------------------
-	m.def("_has_avx512_svml", []() -> bool {
-#ifdef __AVX512F__
-		return true;
-#else
-		return false;
-#endif
-	});
 }

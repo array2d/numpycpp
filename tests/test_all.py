@@ -136,70 +136,52 @@ def dtype(request):
     return request.param
 
 
-# ---------------------------------------------------------------------------
-# AVX-512 SVML detection — bit-exact transcendental math requires BOTH
-# compile-time -mavx512f (which defines __AVX512F__) and runtime AVX-512
-# hardware. If the C++ module was compiled without -mavx512f, the SVML bridge
-# falls back to std:: (1-ULP difference from numpy). In that case ALL
-# transcendental tests are skipped — not just large sizes.
-# ---------------------------------------------------------------------------
-
-def _has_avx512_svml():
-    """Check if C++ module was compiled with AVX-512 SVML bridge (__AVX512F__)."""
-    try:
-        return get_cpp_module()._has_avx512_svml()
-    except Exception:
-        return False
-
-
 # ============================================================================
 # 1. Data-driven element-wise unary math
 # ============================================================================
-# Each entry: (cpp_fn_name, np_fn, input_prep, sizes, transcendental)
+# Each entry: (cpp_fn_name, np_fn, input_prep, sizes)
 #   input_prep: None → random_array directly; else callable: prep(a) → input
 #   sizes: list of (size, seed) tuples
-#   transcendental: True → requires AVX-512 SVML bridge for bit-exact match;
-#                   test is skipped when module compiled without -mavx512f.
+#
+# All functions (including transcendental) are bit-exact on EVERY architecture
+# via numpy's own scalar math functions (npy_exp, npy_log, ...) resolved from
+# _multiarray_umath.so by the SVML bridge. No AVX-512 required.
 
 _UNARY_MATH = [
-    # Pure C++ element-wise — always bit-exact at any size
-    ("sqrt",       np.sqrt,       lambda a: np.abs(a),                [(10, 42), (10000, 7), (100000, 7)], False),
-    ("abs",        np.abs,        None,                               [(10, 42), (10000, 7), (100000, 7)], False),
-    ("round",      np.round,      lambda a: a * 100,                  [(10, 42), (10000, 7), (100000, 7)], False),
-    ("floor",      np.floor,      lambda a: a * 100,                  [(10, 42), (10000, 7), (100000, 7)], False),
-    ("ceil",       np.ceil,       lambda a: a * 100,                  [(10, 42), (10000, 7), (100000, 7)], False),
-    ("degrees",    np.degrees,    None,                               [(10, 42), (10000, 7), (100000, 7)], False),
-    ("radians",    np.radians,    None,                               [(10, 42), (10000, 7), (100000, 7)], False),
-    ("sign",       np.sign,       None,                               [(10, 42), (10000, 7), (100000, 7)], False),
-    # Transcendental — bit-exact only when compiled with -mavx512f (SVML bridge)
-    ("exp",        np.exp,        None,                               [(10, 1), (1000, 7), (10000, 7), (100000, 7)], True),
-    ("log",        np.log,        lambda a: np.abs(a) + 0.1,          [(10, 42), (1000, 7), (10000, 7), (100000, 7)], True),
-    ("sin",        np.sin,        None,                               [(10, 42), (1000, 7), (10000, 7), (100000, 7)], True),
-    ("cos",        np.cos,        None,                               [(10, 42), (1000, 7), (10000, 7), (100000, 7)], True),
-    ("tan",        np.tan,        lambda a: a * 0.5,                  [(10, 42), (1000, 7), (10000, 7), (100000, 7)], True),
-    ("log10",      np.log10,      lambda a: np.abs(a) + 0.1,          [(10, 42), (1000, 7), (10000, 7), (100000, 7)], True),
-    ("log2",       np.log2,       lambda a: np.abs(a) + 0.1,          [(10, 42), (1000, 7), (10000, 7), (100000, 7)], True),
-    ("arcsin",     np.arcsin,     lambda a: np.clip(a * 0.5, -1, 1),  [(10, 42), (1000, 7), (10000, 7), (100000, 7)], True),
-    ("arccos",     np.arccos,     lambda a: np.clip(a * 0.5, -1, 1),  [(10, 42), (1000, 7), (10000, 7), (100000, 7)], True),
-    ("arctan",     np.arctan,     None,                               [(10, 42), (1000, 7), (10000, 7), (100000, 7)], True),
+    ("sqrt",       np.sqrt,       lambda a: np.abs(a),                [(10, 42), (10000, 7), (100000, 7)]),
+    ("abs",        np.abs,        None,                               [(10, 42), (10000, 7), (100000, 7)]),
+    ("exp",        np.exp,        None,                               [(10, 1),  (1000, 7), (10000, 7), (100000, 7)]),
+    ("log",        np.log,        lambda a: np.abs(a) + 0.1,          [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("sin",        np.sin,        None,                               [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("cos",        np.cos,        None,                               [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("tan",        np.tan,        lambda a: a * 0.5,                  [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("log10",      np.log10,      lambda a: np.abs(a) + 0.1,          [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("log2",       np.log2,       lambda a: np.abs(a) + 0.1,          [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("arcsin",     np.arcsin,     lambda a: np.clip(a * 0.5, -1, 1),  [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("arccos",     np.arccos,     lambda a: np.clip(a * 0.5, -1, 1),  [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("arctan",     np.arctan,     None,                               [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("round",      np.round,      lambda a: a * 100,                  [(10, 42), (10000, 7), (100000, 7)]),
+    ("floor",      np.floor,      lambda a: a * 100,                  [(10, 42), (10000, 7), (100000, 7)]),
+    ("ceil",       np.ceil,       lambda a: a * 100,                  [(10, 42), (10000, 7), (100000, 7)]),
+    ("degrees",    np.degrees,    None,                               [(10, 42), (10000, 7), (100000, 7)]),
+    ("radians",    np.radians,    None,                               [(10, 42), (10000, 7), (100000, 7)]),
+    ("sign",       np.sign,       None,                               [(10, 42), (10000, 7), (100000, 7)]),
 ]
 
 
 # Build parametrize tables at module level
 _UNARY_ARGS = []
 _UNARY_IDS = []
-for fn, npf, prep, sizes, trans in _UNARY_MATH:
+for fn, npf, prep, sizes in _UNARY_MATH:
     for size, seed in sizes:
         tag = f"{fn}_{size}"
         if seed != 42: tag += f"_s{seed}"
         _UNARY_IDS.append(tag)
-        _UNARY_ARGS.append(pytest.param(fn, npf, prep, size, seed, trans, id=tag))
+        _UNARY_ARGS.append(pytest.param(fn, npf, prep, size, seed, id=tag))
 
 
-@pytest.mark.parametrize("fn_name, np_fn, prep, size, seed, trans", _UNARY_ARGS)
-def test_unary_math(fn_name, np_fn, prep, size, seed, trans, cpp, dtype):
-    if trans and not cpp._has_avx512_svml():
-        pytest.skip("SVML bridge not compiled with AVX-512")
+@pytest.mark.parametrize("fn_name, np_fn, prep, size, seed", _UNARY_ARGS)
+def test_unary_math(fn_name, np_fn, prep, size, seed, cpp, dtype):
     a = random_array((size,), seed=seed, dtype=dtype)
     inp = prep(a) if prep else a
     cpp_fn = getattr(cpp, fn_name)
@@ -222,8 +204,6 @@ def test_sign_zero(cpp, dtype):
     (2.0, 10000, 7), (3.0, 10000, 7), (0.5, 10000, 7), (-1.0, 10000, 7),
 ])
 def test_power(expval, size, seed, cpp, dtype):
-    if not cpp._has_avx512_svml():
-        pytest.skip("SVML bridge not compiled with AVX-512")
     e = dtype(expval)
     a = np.abs(random_array((size,), seed=seed, dtype=dtype)) + dtype(0.01)
     assert_bit_aligned(cpp.power(a, e), np.power(a, e), f"power({expval})_{size}")
@@ -320,21 +300,15 @@ def test_minimum_large(cpp, dtype):
     assert_bit_aligned(cpp.minimum(a, b), np.minimum(a, b), "minimum large")
 
 def test_arctan2_array(cpp, dtype):
-    if not cpp._has_avx512_svml():
-        pytest.skip("SVML bridge not compiled with AVX-512")
     a = random_array((10,), dtype=dtype)
     b = np.abs(random_array((10,), dtype=dtype)) + dtype(0.1)
     assert_bit_aligned(cpp.arctan2(a, b), np.arctan2(a, b), "arctan2(a,b)")
 
 def test_arctan2_scalar(cpp, dtype):
-    if not cpp._has_avx512_svml():
-        pytest.skip("SVML bridge not compiled with AVX-512")
     a = random_array((10,), dtype=dtype)
     assert_bit_aligned(cpp.arctan2(a, dtype(1.0)), np.arctan2(a, dtype(1.0)), "arctan2(a,1)")
 
 def test_arctan2_large(cpp, dtype):
-    if not cpp._has_avx512_svml():
-        pytest.skip("SVML bridge not compiled with AVX-512")
     a = random_array((10000,), seed=7, dtype=dtype)
     b = np.abs(random_array((10000,), seed=99, dtype=dtype)) + dtype(0.1)
     assert_bit_aligned(cpp.arctan2(a, b), np.arctan2(a, b), "arctan2 large")

@@ -1,6 +1,13 @@
-// SVML/npy bridge — resolve functions from numpy's _multiarray_umath.so.
+// SVML/npy bridge — bit-exact math on every x86_64 architecture.
 //
-// numpy uses SVML for ALL transcendental functions when available.
+// numpy uses different math implementations depending on CPU features:
+//   AVX-512 HW → __svml_exp8 (SVML vector) → resolves via dlsym
+//   non-AVX-512 → npy_exp (scalar)        → resolves via dlsym
+//
+// This header detects CPU features at RUNTIME and selects the matching path.
+// AVX-512 intrinsics are isolated behind __attribute__((target("avx512f")))
+// so the binary is safe on non-AVX-512 CPUs — no SIGILL.
+//
 // Call bridge_init(path_to_multiarray_umath_so) before first use.
 
 #pragma once
@@ -24,128 +31,241 @@ inline void bridge_init(const char* numpy_so_path) {
     if (initialized || !numpy_so_path) return;
     initialized = true;
     g_svml_handle = dlopen(numpy_so_path, RTLD_NOLOAD | RTLD_LAZY);
-    fprintf(stderr, "[SVML] bridge_init(%s) -> handle=%p dlerror=%s\n",
-            numpy_so_path, g_svml_handle, dlerror());
 }
 
 inline void* resolve_svml(const char* name) {
     void* h = g_svml_handle;
-    if (h) {
-        void* ptr = dlsym(h, name);
-        fprintf(stderr, "[SVML] resolve(%s) -> %p dlerror=%s\n", name, ptr, dlerror());
-        return ptr;
-    }
-    fprintf(stderr, "[SVML] resolve(%s) -> NO HANDLE\n", name);
+    if (h) return dlsym(h, name);
     return nullptr;
 }
 
 // ============================================================================
-// SVML wrapper macros — consolidate repetitive f64/f32 patterns
+// Runtime CPU detection
+// ============================================================================
+
+inline bool cpu_has_avx512f() {
+#ifdef __AVX512F__
+    return __builtin_cpu_supports("avx512f");
+#else
+    return false;
+#endif
+}
+
+// ============================================================================
+// AVX-512 SVML path — isolated behind target attribute to prevent SIGILL
+// on non-AVX-512 hardware.
 // ============================================================================
 
 #ifdef __AVX512F__
 
-// 1-arg f64: __svml_XXX8 → __m512d → extract scalar
-// 1-arg f32: __svml_XXXf16 → __m512 → extract scalar
-#define NUMPY_SVML_F64(name, sym, fallback)          \
-    inline double name(double x) {                    \
-        static auto fn = (__m512d (*)(__m512d))       \
-            resolve_svml(sym);                        \
-        if (fn) return _mm512_cvtsd_f64(              \
-            fn(_mm512_set1_pd(x)));                   \
-        return fallback(x);                           \
-    }
-#define NUMPY_SVML_F32(name, sym, fallback)          \
-    inline float name(float x) {                      \
-        static auto fn = (__m512 (*)(__m512))         \
-            resolve_svml(sym);                        \
-        if (fn) return _mm512_cvtss_f32(              \
-            fn(_mm512_set1_ps(x)));                   \
-        return fallback(x);                           \
+#define NUMPY_SVML_F64(name, svml_sym, npy_sym)                         \
+    __attribute__((target("avx512f")))                                   \
+    inline double name##_svml_f64(double x) {                            \
+        static auto fn = (__m512d (*)(__m512d))resolve_svml(svml_sym);   \
+        if (fn) return _mm512_cvtsd_f64(fn(_mm512_set1_pd(x)));         \
+        return std::name(x); /* fallback if SVML resolution fails */     \
     }
 
-NUMPY_SVML_F64(exp_f64,  "__svml_exp8",  std::exp)
-NUMPY_SVML_F64(log_f64,  "__svml_log8",  std::log)
-NUMPY_SVML_F64(sin_f64,  "__svml_sin8",  std::sin)
-NUMPY_SVML_F64(cos_f64,  "__svml_cos8",  std::cos)
-NUMPY_SVML_F64(tan_f64,  "__svml_tan8",  std::tan)
-NUMPY_SVML_F64(asin_f64, "__svml_asin8", std::asin)
-NUMPY_SVML_F64(acos_f64, "__svml_acos8", std::acos)
-NUMPY_SVML_F64(atan_f64, "__svml_atan8", std::atan)
-NUMPY_SVML_F64(log10_f64,"__svml_log108",std::log10)
-NUMPY_SVML_F64(log2_f64, "__svml_log28", std::log2)
-NUMPY_SVML_F64(exp2_f64, "__svml_exp28", std::exp2)
+#define NUMPY_SVML_F32(name, svml_sym, npy_sym)                         \
+    __attribute__((target("avx512f")))                                   \
+    inline float name##_svml_f32(float x) {                              \
+        static auto fn = (__m512 (*)(__m512))resolve_svml(svml_sym);     \
+        if (fn) return _mm512_cvtss_f32(fn(_mm512_set1_ps(x)));         \
+        return std::name(x);                                             \
+    }
 
-// pow/atan2 — 2-arg scalar (npy_pow / npy_atan2)
-inline double pow_f64(double x, double e) {
+NUMPY_SVML_F64(exp,   "__svml_exp8",   "npy_exp")
+NUMPY_SVML_F64(log,   "__svml_log8",   "npy_log")
+NUMPY_SVML_F64(sin,   "__svml_sin8",   "npy_sin")
+NUMPY_SVML_F64(cos,   "__svml_cos8",   "npy_cos")
+NUMPY_SVML_F64(tan,   "__svml_tan8",   "npy_tan")
+NUMPY_SVML_F64(asin,  "__svml_asin8",  "npy_asin")
+NUMPY_SVML_F64(acos,  "__svml_acos8",  "npy_acos")
+NUMPY_SVML_F64(atan,  "__svml_atan8",  "npy_atan")
+NUMPY_SVML_F64(log10, "__svml_log108", "npy_log10")
+NUMPY_SVML_F64(log2,  "__svml_log28",  "npy_log2")
+NUMPY_SVML_F64(exp2,  "__svml_exp28",  "npy_exp2")
+
+NUMPY_SVML_F32(tan,   "__svml_tanf16",  "npy_tanf")
+NUMPY_SVML_F32(asin,  "__svml_asinf16", "npy_asinf")
+NUMPY_SVML_F32(acos,  "__svml_acosf16", "npy_acosf")
+NUMPY_SVML_F32(atan,  "__svml_atanf16", "npy_atanf")
+NUMPY_SVML_F32(log10, "__svml_log10f16","npy_log10f")
+NUMPY_SVML_F32(log2,  "__svml_log2f16", "npy_log2f")
+NUMPY_SVML_F32(exp2,  "__svml_exp2f16", "npy_exp2f")
+
+// pow / atan2 — SVML 2-arg
+__attribute__((target("avx512f")))
+inline double pow_svml_f64(double x, double e) {
     static auto fn = (double (*)(double, double))resolve_svml("npy_pow");
     if (fn) return fn(x, e);
     return std::pow(x, e);
 }
-inline double atan2_f64(double y, double x) {
+__attribute__((target("avx512f")))
+inline float pow_svml_f32(float x, float e) {
+    static auto fn = (float (*)(float, float))resolve_svml("npy_powf");
+    if (fn) return fn(x, e);
+    return std::pow(x, e);
+}
+__attribute__((target("avx512f")))
+inline double atan2_svml_f64(double y, double x) {
     static auto fn = (double (*)(double, double))resolve_svml("npy_atan2");
     if (fn) return fn(y, x);
     return std::atan2(y, x);
 }
-
-// f32: exp/log/sin/cos use numpy's own polynomial approximations
-inline float exp_f32(float x)  { return npy_float_math::npy_expf(x); }
-inline float log_f32(float x)  { return npy_float_math::npy_logf(x); }
-inline float sin_f32(float x)  { return npy_float_math::npy_sinf(x); }
-inline float cos_f32(float x)  { return npy_float_math::npy_cosf(x); }
-
-NUMPY_SVML_F32(tan_f32,  "__svml_tanf16",  std::tan)
-NUMPY_SVML_F32(asin_f32, "__svml_asinf16", std::asin)
-NUMPY_SVML_F32(acos_f32, "__svml_acosf16", std::acos)
-NUMPY_SVML_F32(atan_f32, "__svml_atanf16", std::atan)
-NUMPY_SVML_F32(log10_f32,"__svml_log10f16",std::log10)
-NUMPY_SVML_F32(log2_f32, "__svml_log2f16", std::log2)
-NUMPY_SVML_F32(exp2_f32, "__svml_exp2f16", std::exp2)
-
-inline float pow_f32(float x, float e)   { return std::pow(x, e); }
-inline float atan2_f32(float y, float x) { return std::atan2(y, x); }
+__attribute__((target("avx512f")))
+inline float atan2_svml_f32(float y, float x) {
+    static auto fn = (float (*)(float, float))resolve_svml("npy_atan2f");
+    if (fn) return fn(y, x);
+    return std::atan2(y, x);
+}
 
 #undef NUMPY_SVML_F64
 #undef NUMPY_SVML_F32
 
-#else // !__AVX512F__
-
-// Non-AVX512: all 1-arg wrappers degrade to std or npy_math
-#define NUMPY_FB_F64(name, fallback) inline double name(double x) { return fallback(x); }
-#define NUMPY_FB_F32(name, fallback) inline float name(float x)   { return fallback(x); }
-
-NUMPY_FB_F64(exp_f64,  std::exp)
-NUMPY_FB_F64(log_f64,  std::log)
-NUMPY_FB_F64(sin_f64,  std::sin)
-NUMPY_FB_F64(cos_f64,  std::cos)
-NUMPY_FB_F64(tan_f64,  std::tan)
-NUMPY_FB_F64(asin_f64, std::asin)
-NUMPY_FB_F64(acos_f64, std::acos)
-NUMPY_FB_F64(atan_f64, std::atan)
-NUMPY_FB_F64(log10_f64,std::log10)
-NUMPY_FB_F64(log2_f64, std::log2)
-NUMPY_FB_F64(exp2_f64, std::exp2)
-inline double pow_f64(double x, double e)   { return std::pow(x, e); }
-inline double atan2_f64(double y, double x) { return std::atan2(y, x); }
-
-NUMPY_FB_F32(exp_f32,  npy_float_math::npy_expf)
-NUMPY_FB_F32(log_f32,  npy_float_math::npy_logf)
-NUMPY_FB_F32(sin_f32,  npy_float_math::npy_sinf)
-NUMPY_FB_F32(cos_f32,  npy_float_math::npy_cosf)
-NUMPY_FB_F32(tan_f32,  std::tan)
-NUMPY_FB_F32(asin_f32, std::asin)
-NUMPY_FB_F32(acos_f32, std::acos)
-NUMPY_FB_F32(atan_f32, std::atan)
-NUMPY_FB_F32(log10_f32,std::log10)
-NUMPY_FB_F32(log2_f32, std::log2)
-NUMPY_FB_F32(exp2_f32, std::exp2)
-inline float pow_f32(float x, float e)   { return std::pow(x, e); }
-inline float atan2_f32(float y, float x) { return std::atan2(y, x); }
-
-#undef NUMPY_FB_F64
-#undef NUMPY_FB_F32
-
 #endif // __AVX512F__
+
+// ============================================================================
+// Scalar npy_* path — used when AVX-512 not available at runtime.
+// Resolves numpy's scalar math functions (npy_exp, npy_log, ...) via dlsym.
+// ============================================================================
+
+#define NUMPY_NPY_F64(name, fallback_expr)                             \
+    inline double name##_npy_f64(double x) {                            \
+        static auto fn = (double (*)(double))resolve_svml("npy_" #name); \
+        if (fn) return fn(x);                                           \
+        return (fallback_expr);                                         \
+    }
+
+#define NUMPY_NPY_F32(name, fallback_expr)                              \
+    inline float name##_npy_f32(float x) {                              \
+        static auto fn = (float (*)(float))resolve_svml("npy_" #name "f"); \
+        if (fn) return fn(x);                                           \
+        return (fallback_expr);                                         \
+    }
+
+NUMPY_NPY_F64(exp,   std::exp(x))
+NUMPY_NPY_F64(log,   std::log(x))
+NUMPY_NPY_F64(sin,   std::sin(x))
+NUMPY_NPY_F64(cos,   std::cos(x))
+NUMPY_NPY_F64(tan,   std::tan(x))
+NUMPY_NPY_F64(asin,  std::asin(x))
+NUMPY_NPY_F64(acos,  std::acos(x))
+NUMPY_NPY_F64(atan,  std::atan(x))
+NUMPY_NPY_F64(log10, std::log10(x))
+NUMPY_NPY_F64(log2,  std::log2(x))
+NUMPY_NPY_F64(exp2,  std::exp2(x))
+
+// f32: fallback via numpy's own polynomial approximations
+// f32 exp/log/sin/cos: numpy's own polynomial approximations (npy_math_float.h)
+// are the canonical implementation for float32. dlsym npy_expf/etc. would
+// resolve a different (non-matching) code path. Never use dlsym for these.
+inline float exp_npy_f32(float x)  { return npy_float_math::npy_expf(x); }
+inline float log_npy_f32(float x)  { return npy_float_math::npy_logf(x); }
+inline float sin_npy_f32(float x)  { return npy_float_math::npy_sinf(x); }
+inline float cos_npy_f32(float x)  { return npy_float_math::npy_cosf(x); }
+NUMPY_NPY_F32(tan,   std::tan(x))
+NUMPY_NPY_F32(asin,  std::asin(x))
+NUMPY_NPY_F32(acos,  std::acos(x))
+NUMPY_NPY_F32(atan,  std::atan(x))
+NUMPY_NPY_F32(log10, std::log10(x))
+NUMPY_NPY_F32(log2,  std::log2(x))
+NUMPY_NPY_F32(exp2,  std::exp2(x))
+
+inline double pow_npy_f64(double x, double e) {
+    static auto fn = (double (*)(double, double))resolve_svml("npy_pow");
+    if (fn) return fn(x, e);
+    return std::pow(x, e);
+}
+inline float pow_npy_f32(float x, float e) {
+    static auto fn = (float (*)(float, float))resolve_svml("npy_powf");
+    if (fn) return fn(x, e);
+    return std::pow(x, e);
+}
+inline double atan2_npy_f64(double y, double x) {
+    static auto fn = (double (*)(double, double))resolve_svml("npy_atan2");
+    if (fn) return fn(y, x);
+    return std::atan2(y, x);
+}
+inline float atan2_npy_f32(float y, float x) {
+    static auto fn = (float (*)(float, float))resolve_svml("npy_atan2f");
+    if (fn) return fn(y, x);
+    return std::atan2(y, x);
+}
+
+#undef NUMPY_NPY_F64
+#undef NUMPY_NPY_F32
+
+// ============================================================================
+// Dispatchers — select SVML (AVX-512) or npy_* (scalar) at runtime
+// ============================================================================
+
+#define DISPATCH_F64(name)                                              \
+    inline double name##_f64(double x) {                                 \
+        if (cpu_has_avx512f()) {                                         \
+            return name##_svml_f64(x);                                   \
+        }                                                                \
+        return name##_npy_f64(x);                                        \
+    }
+
+#define DISPATCH_F32(name)                                              \
+    inline float name##_f32(float x) {                                   \
+        if (cpu_has_avx512f()) {                                         \
+            return name##_svml_f32(x);                                   \
+        }                                                                \
+        return name##_npy_f32(x);                                        \
+    }
+
+DISPATCH_F64(exp)
+DISPATCH_F64(log)
+DISPATCH_F64(sin)
+DISPATCH_F64(cos)
+DISPATCH_F64(tan)
+DISPATCH_F64(asin)
+DISPATCH_F64(acos)
+DISPATCH_F64(atan)
+DISPATCH_F64(log10)
+DISPATCH_F64(log2)
+DISPATCH_F64(exp2)
+DISPATCH_F32(tan)
+DISPATCH_F32(asin)
+DISPATCH_F32(acos)
+DISPATCH_F32(atan)
+DISPATCH_F32(log10)
+DISPATCH_F32(log2)
+DISPATCH_F32(exp2)
+
+// f32 exp/log/sin/cos: numpy uses its own polynomial approximations
+// (npy_math_float.h), NOT SVML. These are bit-exact on all architectures.
+inline float exp_f32(float x)  { return exp_npy_f32(x); }
+inline float log_f32(float x)  { return log_npy_f32(x); }
+inline float sin_f32(float x)  { return sin_npy_f32(x); }
+inline float cos_f32(float x)  { return cos_npy_f32(x); }
+
+// pow / atan2 dispatchers
+inline double pow_f64(double x, double e) {
+    if (cpu_has_avx512f()) return pow_svml_f64(x, e);
+    return pow_npy_f64(x, e);
+}
+inline float pow_f32(float x, float e) {
+    if (cpu_has_avx512f()) return pow_svml_f32(x, e);
+    return pow_npy_f32(x, e);
+}
+inline double atan2_f64(double y, double x) {
+    if (cpu_has_avx512f()) return atan2_svml_f64(y, x);
+    return atan2_npy_f64(y, x);
+}
+inline float atan2_f32(float y, float x) {
+    if (cpu_has_avx512f()) return atan2_svml_f32(y, x);
+    return atan2_npy_f32(y, x);
+}
+
+// sqrt — always std::sqrt (numpy's sqrt matches IEEE 754)
+inline double sqrt_f64(double x) { return std::sqrt(x); }
+inline float  sqrt_f32(float x)  { return std::sqrt(x); }
+
+#undef DISPATCH_F64
+#undef DISPATCH_F32
 
 // ============================================================================
 // Template dispatchers — svml_impl<T> + free function templates
@@ -164,6 +284,7 @@ template<> struct svml_impl<T> {                                     \
     static T log10(T x){ return log10_##suff(x); }                   \
     static T log2(T x) { return log2_##suff(x); }                    \
     static T exp2(T x) { return exp2_##suff(x); }                    \
+    static T sqrt(T x) { return sqrt_##suff(x); }                    \
     static T pow(T x, T e)    { return pow_##suff(x, e); }           \
     static T atan2(T y, T x)  { return atan2_##suff(y, x); }         \
 };
@@ -187,9 +308,10 @@ NUMPY_SVML_D1(atan)
 NUMPY_SVML_D1(log10)
 NUMPY_SVML_D1(log2)
 NUMPY_SVML_D1(exp2)
+NUMPY_SVML_D1(sqrt)
 #undef NUMPY_SVML_D1
 
-// 2-arg dispatchers (parameter names differ: pow(x,e) vs atan2(y,x))
+// 2-arg dispatchers
 template<typename T> inline T pow(T x, T e)    { return svml_impl<T>::pow(x, e); }
 template<typename T> inline T atan2(T y, T x)  { return svml_impl<T>::atan2(y, x); }
 

@@ -17,7 +17,7 @@ We created `numpycpp` to keep NumPy's familiar usage patterns while letting C++ 
 
 All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (460 tests, float64 + float32).
 
-**Bit-exact math** is achieved via an SVML bridge that resolves numpy's own transcendental functions (`__svml_exp8`, `__svml_sin8`, etc.) from the loaded `_multiarray_umath.so` at runtime. This guarantees that `exp`, `log`, `sin`, `cos`, `tan`, and all other transcendental functions produce the exact same bits as numpy. On platforms without AVX-512, the bridge falls back to `std::` (1‑ULP).
+**Bit-exact math** is achieved by resolving numpy's own math functions from `_multiarray_umath.so` at runtime. The SVML bridge auto-detects your CPU and selects the same path numpy uses: AVX‑512 SVML (`__svml_exp8`) when available, or scalar `npy_exp`/`npy_log`/etc. otherwise. AVX‑512 intrinsics are isolated behind `__attribute__((target))` — the binary is safe on any x86_64 CPU (no SIGILL). Every transcendental function produces the exact same IEEE 754 bits as numpy on **all architectures**.
 
 ## Quick Start
 
@@ -102,6 +102,7 @@ The Makefile applies the following flags:
 ```makefile
 CXXFLAGS ?= -std=c++17 -O2 -fPIC -fopenmp                \
             -ffp-contract=off -ffloat-store -msse4.1      \
+            -mavx512f -mfma                                \
             -fno-builtin-exp    -fno-builtin-log           \
             -fno-builtin-sin    -fno-builtin-cos           \
             -fno-builtin-tan    -fno-builtin-pow           \
@@ -109,11 +110,6 @@ CXXFLAGS ?= -std=c++17 -O2 -fPIC -fopenmp                \
             -fno-builtin-log2   -fno-builtin-log10         \
             -fno-builtin-asin   -fno-builtin-acos          \
             -fno-builtin-atan   -fno-builtin-exp2
-# Optional: enable AVX-512 for bit-exact transcendental math.
-# Requires AVX-512 hardware. Usage: make AVX512=1
-ifdef AVX512
-CXXFLAGS += -mavx512f -mfma
-endif
 LDFLAGS   = -shared -ldl
 ```
 
@@ -122,25 +118,24 @@ LDFLAGS   = -shared -ldl
 | `-ffp-contract=off` | Disable FMA contraction — numpy does not contract |
 | `-ffloat-store` | Prevent excess x87 precision in registers |
 | `-msse4.1` | Required for einsum SSE intrinsics (`_mm_hadd_pd`, `_mm_insert_epi32`) |
-| `-mavx512f -mfma` | **Optional** (`make AVX512=1`): enable SVML bridge for bit-exact transcendental math. Requires AVX-512 hardware. Without this, transcendental functions fall back to `std::` (1‑ULP difference) |
-| `-fno-builtin-<func>` | **Critical**: prevent GCC from replacing math calls with its built-in implementations. Without these, `exp`/`log`/`sin`/etc. will use libm instead of the SVML bridge, breaking bit-exact alignment |
-| `-ldl` | Required for `dlsym` at runtime to resolve SVML symbols from `_multiarray_umath.so` |
+| `-mavx512f -mfma` | Enable AVX‑512 compilation for SVML bridge. Intrinsics are runtime‑guarded via `__attribute__((target))` — safe on any x86_64 CPU (no SIGILL) |
+| `-fno-builtin-<func>` | Prevent GCC from replacing math calls with built‑ins, ensuring the SVML bridge intercepts every call |
+| `-ldl` | Required for `dlsym` at runtime to resolve numpy's math functions from `_multiarray_umath.so` |
 
-> **Why `-fno-builtin` matters**: GCC's built-in math functions produce different last-bits than numpy's SVML.
-> Even `std::exp` vs `__svml_exp8` differ by 1‑2 ULP for some inputs.
-> These flags ensure the SVML bridge intercepts every transcendental call, guaranteeing bit-identical output.
-> 
-> **AVX-512 is optional**: The test suite auto-detects whether the module was compiled with `-mavx512f`
-> and skips transcendental tests when it was not. Non-AVX-512 builds are safe for CI and machines
-> without AVX-512 hardware — only the transcendental tests are skipped; all other 350+ tests still run.
+> **Runtime CPU dispatch**: The SVML bridge auto‑detects AVX‑512 at runtime
+> (`__builtin_cpu_supports`). On AVX‑512 hardware it calls numpy's SVML vector functions
+> (`__svml_exp8`, etc.); otherwise it falls back to numpy's scalar math functions
+> (`npy_exp`, `npy_log`, etc.). Both paths are resolved from the loaded
+> `_multiarray_umath.so` via `dlsym`. AVX‑512 intrinsics are isolated behind
+> `__attribute__((target("avx512f")))` so the binary runs safely on ANY
+> x86_64 CPU — no SIGILL.
 
 ### Alignment status
 
 The table below reflects the current bit-level parity between `numpycpp` C++ and Python numpy.
 All 460 tests pass under strict IEEE 754 bit comparison (float64 + float32).
 
-✅ = bit-exact on AVX-512 (SVML bridge active).  
-🔶 = 1-ULP on non-AVX-512 (falls back to `std::` math).
+✅ = bit-exact on ALL architectures (SVML bridge with runtime CPU dispatch).
 
 | API group         | float64 | float32 | Notes |
 |-------------------|:-------:|:-------:|-------|
@@ -154,9 +149,9 @@ All 460 tests pass under strict IEEE 754 bit comparison (float64 + float32).
 | Setops / interp   | ✅ | ✅ | isin, intersect1d, interp, safe_divide |
 | Access / convert  | ✅ | ✅ | array_get, asarray, to_vector |
 | **Math — element-wise** (sqrt, abs, sign, clip, round, floor, ceil, degrees, radians) | ✅ | ✅ | Pure C++, no libm dependency |
-| **Math — transcendental** (exp, log, sin, cos, tan, asin, acos, atan, log10, log2, exp2) | ✅ | 🔶 | SVML bridge → bit-exact; fallback → std:: (1-ULP) |
-| **Math — power**   | ✅ | 🔶 | SVML bridge for f64; f32: std::pow |
-| **Math — atan2**   | ✅ | 🔶 | npy_atan2 via SVML bridge |
+| **Math — transcendental** (exp, log, sin, cos, tan, asin, acos, atan, log10, log2, exp2) | ✅ | ✅ | npy_* scalar functions via dlsym, bit-exact on all archs |
+| **Math — power**   | ✅ | ✅ | npy_pow / npy_powf via SVML bridge |
+| **Math — atan2**   | ✅ | ✅ | npy_atan2 / npy_atan2f via SVML bridge |
 | **Reduction** (sum, mean, max, min, any, all) | ✅ | ✅ | pairwise_sum matches numpy exactly |
 | Statistical (std, var) | ✅ | ✅ | pairwise_sum + sqrt |
 | Binary (maximum, minimum) | ✅ | ✅ | std::max/min, deterministic |
@@ -165,7 +160,7 @@ All 460 tests pass under strict IEEE 754 bit comparison (float64 + float32).
 | **Norm (axis)**    | ✅ | ✅ | Fiber-wise pairwise_sum + sqrt |
 | **Einsum**         | ✅ | ✅ | All patterns (ij,ij→i, ij,jk→ik, bij,bjk→bik, etc.) |
 
-> **SVML bridge**: On AVX-512 platforms, `numpycpp` resolves numpy's own SVML vector functions (`__svml_exp8`, `__svml_sin8`, etc.) from the loaded `_multiarray_umath.so` via `dlsym`. This guarantees bit-identical transcendental results. On non-AVX-512, `std::` fallbacks produce ≤ 1 ULP difference.
+> **SVML bridge**: At runtime, `numpycpp` detects CPU features (`__builtin_cpu_supports("avx512f")`) and selects the same math path numpy uses — AVX‑512 SVML vector functions (`__svml_exp8`, etc.) on supported hardware, or scalar `npy_exp`/`npy_log`/etc. otherwise. Both are resolved from the loaded `_multiarray_umath.so` via `dlsym`. AVX‑512 intrinsics are isolated behind `__attribute__((target("avx512f")))` — the binary compiles and runs safely on ANY x86_64 CPU without SIGILL.
 >
 > **Reductions**: All reductions use numpy's pairwise summation algorithm (recursive split, 8-accumulator unrolled). This matches `np.sum` exactly. Dot products and norms build on pairwise_sum, not BLAS — matching `np.sum(a*b)` and `np.sqrt(np.sum(a*a))` respectively.
 

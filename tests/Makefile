@@ -5,17 +5,12 @@
 
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -fPIC -fopenmp -ffp-contract=off \
-	-ffloat-store -msse4.1 \
+	-ffloat-store -msse4.1 -mavx512f -mfma \
 	-fno-builtin-exp -fno-builtin-log -fno-builtin-sin \
 	-fno-builtin-cos -fno-builtin-tan -fno-builtin-pow \
 	-fno-builtin-sqrt -fno-builtin-atan2 -fno-builtin-log2 \
 	-fno-builtin-log10 -fno-builtin-asin -fno-builtin-acos \
 	-fno-builtin-atan -fno-builtin-exp2
-# Optional: enable AVX-512 for SVML bridge bit-exact transcendental math.
-# Requires AVX-512 hardware. Usage: make AVX512=1
-ifdef AVX512
-CXXFLAGS += -mavx512f -mfma
-endif
 INCLUDES  = -I.. -I../pycpp $(shell python3 -m pybind11 --includes) $(shell pkg-config --cflags eigen3 2>/dev/null || echo)
 LDFLAGS   = -shared -ldl
 
