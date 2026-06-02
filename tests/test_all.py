@@ -1191,6 +1191,7 @@ class TestEinsumLargeGateMachine:
 
 
 if __name__ == "__main__":
-    import sys, os
+    import sys, os, warnings
+    warnings.filterwarnings("ignore", category=UserWarning)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     sys.exit(pytest.main([__file__, "-q", "--tb=short", "--no-header"]))
