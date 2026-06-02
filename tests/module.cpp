@@ -47,7 +47,7 @@ PYBIND11_MODULE(numpycpp, m) {
     try {
         py::module_ np_core = py::module_::import("numpy.core._multiarray_umath");
         std::string umath_path = np_core.attr("__file__").cast<std::string>();
-        numpy::svml::bridge_init(umath_path.c_str());
+        numpy::detail::bridge_init(umath_path.c_str());
     } catch (...) {
         // Fall back: SVML → libm
     }

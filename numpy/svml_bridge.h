@@ -1,6 +1,9 @@
 // INTERNAL HEADER — DO NOT INCLUDE DIRECTLY.
 // Use #include "numpy/core.h" which pulls this in automatically.
 //
+// All functions live in numpy::detail — do not call numpy::detail::exp()
+// directly. Use numpy::exp() from core.h.
+//
 // SVML/npy bridge — bit-exact math on every x86_64 architecture.
 //
 // numpy uses different math implementations depending on CPU features:
@@ -25,7 +28,9 @@
 #endif
 
 namespace numpy {
-namespace svml {
+namespace detail {
+// Internal dispatch namespace — use numpy::exp() etc., not numpy::detail::exp().
+// All math functions are resolved at runtime from numpy's _multiarray_umath.so.
 
 inline void* g_svml_handle = nullptr;
 
@@ -318,5 +323,5 @@ NUMPY_SVML_D1(sqrt)
 template<typename T> inline T pow(T x, T e)    { return svml_impl<T>::pow(x, e); }
 template<typename T> inline T atan2(T y, T x)  { return svml_impl<T>::atan2(y, x); }
 
-} // namespace svml
+} // namespace detail
 } // namespace numpy

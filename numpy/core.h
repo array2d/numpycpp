@@ -86,37 +86,37 @@ inline void abs(const T* src, T* dst, size_t n) {
 /// numpy.exp(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void exp(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::exp(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::exp(src[i]));
 }
 
 /// numpy.log(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void log(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::log(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::log(src[i]));
 }
 
 /// numpy.sin(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void sin(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::sin(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::sin(src[i]));
 }
 
 /// numpy.cos(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void cos(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::cos(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::cos(src[i]));
 }
 
 /// numpy.tan(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void tan(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::tan(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::tan(src[i]));
 }
 
 /// numpy.power(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
 inline void power(const T* src, T* dst, size_t n, T exponent) {
-    NUMPY_UNROLL4(i, dst[i] = svml::pow(src[i], exponent));
+    NUMPY_UNROLL4(i, dst[i] = detail::pow(src[i], exponent));
 }
 
 /// numpy.clip(a, a_min, a_max, out=None, **kwargs)
@@ -128,31 +128,31 @@ inline void clip(const T* src, T* dst, size_t n, T min_val, T max_val) {
 /// numpy.log10(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void log10(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::log10(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::log10(src[i]));
 }
 
 /// numpy.log2(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void log2(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::log2(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::log2(src[i]));
 }
 
 /// numpy.arcsin(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void arcsin(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::asin(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::asin(src[i]));
 }
 
 /// numpy.arccos(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void arccos(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::acos(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::acos(src[i]));
 }
 
 /// numpy.arctan(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void arctan(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::atan(src[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::atan(src[i]));
 }
 
 /// numpy.round(a, decimals=0, out=None)
@@ -414,12 +414,12 @@ inline void isfinite(const T* src, bool* dst, size_t n) {
 /// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 inline void arctan2_array(const T* a, const T* b, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = svml::atan2(a[i], b[i]));
+    NUMPY_UNROLL4(i, dst[i] = detail::atan2(a[i], b[i]));
 }
 /// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-scalar
 template<typename T>
 inline void arctan2_scalar(const T* src, T* dst, size_t n, T b) {
-    NUMPY_UNROLL4(i, dst[i] = svml::atan2(src[i], b));
+    NUMPY_UNROLL4(i, dst[i] = detail::atan2(src[i], b));
 }
 /// numpy.maximum(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
