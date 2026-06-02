@@ -15,7 +15,7 @@ We created `numpycpp` to keep NumPy's familiar usage patterns while letting C++ 
 
 `numpycpp` is a **header-only C++ library** implementing numpy's core API (`numpy.*`, `numpy.linalg.*`, `numpy.einsum`) with **bit-level precision alignment**. Raw pointer + size interface. Zero external dependencies — pure C++17 standard library.
 
-All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (336 tests, float64 + float32).
+All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (449 tests, float64 + float32).
 
 **Bit-exact math** is achieved via an SVML bridge that resolves numpy's own transcendental functions (`__svml_exp8`, `__svml_sin8`, etc.) from the loaded `_multiarray_umath.so` at runtime. This guarantees that `exp`, `log`, `sin`, `cos`, `tan`, and all other transcendental functions produce the exact same bits as numpy. On platforms without AVX-512, the bridge falls back to `std::` (1‑ULP).
 
@@ -80,12 +80,12 @@ Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly
 ### Testing
 
 The test suite verifies **bit-level precision alignment** between every C++ function and Python numpy.
-No tolerance, no `atol`/`rtol` — raw IEEE 754 bits must match exactly. 336 tests, float64 + float32.
+No tolerance, no `atol`/`rtol` — raw IEEE 754 bits must match exactly. 449 tests, float64 + float32.
 
 ```bash
 cd tests
 make                    # compile C++ test module
-make test               # run all 336 tests (silent mode: only failures print)
+make test               # run all 449 tests (silent mode: only failures print)
 ```
 
 To run with verbose output:
@@ -94,10 +94,41 @@ To run with verbose output:
 PYTHONPATH=tests:$PYTHONPATH python3 -m pytest tests/test_all.py -v
 ```
 
+### Compiler flags for bit-exact alignment
+
+Achieving bit-identical results with numpy requires strict control over floating-point code generation.
+The Makefile applies the following flags:
+
+```makefile
+CXXFLAGS ?= -std=c++17 -O2 -fPIC -fopenmp                \
+            -ffp-contract=off -ffloat-store               \
+            -mavx512f -mfma                                \
+            -fno-builtin-exp    -fno-builtin-log           \
+            -fno-builtin-sin    -fno-builtin-cos           \
+            -fno-builtin-tan    -fno-builtin-pow           \
+            -fno-builtin-sqrt   -fno-builtin-atan2         \
+            -fno-builtin-log2   -fno-builtin-log10         \
+            -fno-builtin-asin   -fno-builtin-acos          \
+            -fno-builtin-atan   -fno-builtin-exp2
+LDFLAGS   = -shared -ldl
+```
+
+| Flag | Purpose |
+|------|---------|
+| `-ffp-contract=off` | Disable FMA contraction — numpy does not contract |
+| `-ffloat-store` | Prevent excess x87 precision in registers |
+| `-mavx512f -mfma` | Enable AVX-512 so the SVML bridge resolves numpy's own vector math library |
+| `-fno-builtin-<func>` | **Critical**: prevent GCC from replacing math calls with its built-in implementations. Without these, `exp`/`log`/`sin`/etc. will use libm instead of the SVML bridge, breaking bit-exact alignment |
+| `-ldl` | Required for `dlsym` at runtime to resolve SVML symbols from `_multiarray_umath.so` |
+
+> **Why `-fno-builtin` matters**: GCC's built-in math functions produce different last-bits than numpy's SVML.
+> Even `std::exp` vs `__svml_exp8` differ by 1‑2 ULP for some inputs.
+> These flags ensure the SVML bridge intercepts every transcendental call, guaranteeing bit-identical output.
+
 ### Alignment status
 
 The table below reflects the current bit-level parity between `numpycpp` C++ and Python numpy.
-All 336 tests pass under strict IEEE 754 bit comparison (float64 + float32).
+All 449 tests pass under strict IEEE 754 bit comparison (float64 + float32).
 
 ✅ = bit-exact on AVX-512 (SVML bridge active).  
 🔶 = 1-ULP on non-AVX-512 (falls back to `std::` math).
@@ -145,7 +176,7 @@ numpycpp/
 │   └── einsum_py.h
 ├── tests/              # bit-level precision tests + test module
 │   ├── module.cpp      # pybind11 module for testing
-│   ├── test_all.py     # single entry — all APIs, 336 tests, float64+float32
+│   ├── test_all.py     # single entry — all APIs, 449 tests, float64+float32
 │   ├── conftest.py     # silent-mode output suppression
 │   └── Makefile
 ├── CMakeLists.txt      # build & .deb packaging
