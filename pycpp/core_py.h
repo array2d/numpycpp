@@ -11,6 +11,7 @@
 #include "../numpy/core.h"
 #include <vector>
 #include <cstring>
+#include <cstdint>
 
 namespace py = pybind11;
 
@@ -116,30 +117,132 @@ inline py::array ones_like(const py::array& arr, const std::string& dtype) {
 inline py::array astype(const py::array& arr, const std::string& dtype) {
     auto buf = arr.request();
     auto dt = arr.dtype();
+
     // float64 input
     if (dt.is(py::dtype::of<double>())) {
-        if (dtype == "int" || dtype == "int32" || dtype == "int64") {
-            py::array_t<int> result(buf.shape);
-            astype<int, double>(static_cast<const double*>(buf.ptr),
-                                static_cast<int*>(result.request().ptr), buf.size);
-            return result;
+        auto* src = static_cast<const double*>(buf.ptr);
+        if (dtype == "float32" || dtype == "float") {
+            py::array_t<float> r(buf.shape);
+            astype<float, double>(src, static_cast<float*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "int" || dtype == "int32") {
+            py::array_t<int> r(buf.shape);
+            astype<int, double>(src, static_cast<int*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "int64") {
+            py::array_t<int64_t> r(buf.shape);
+            astype<int64_t, double>(src, static_cast<int64_t*>(r.request().ptr), buf.size);
+            return r;
         }
         if (dtype == "bool") {
-            py::array_t<bool> result(buf.shape);
-            astype<bool, double>(static_cast<const double*>(buf.ptr),
-                                 static_cast<bool*>(result.request().ptr), buf.size);
-            return result;
+            py::array_t<bool> r(buf.shape);
+            astype<bool, double>(src, static_cast<bool*>(r.request().ptr), buf.size);
+            return r;
         }
     }
-    // int input
+
+    // float32 input
+    if (dt.is(py::dtype::of<float>())) {
+        auto* src = static_cast<const float*>(buf.ptr);
+        if (dtype == "float64" || dtype == "double") {
+            py::array_t<double> r(buf.shape);
+            astype<double, float>(src, static_cast<double*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "int" || dtype == "int32") {
+            py::array_t<int> r(buf.shape);
+            astype<int, float>(src, static_cast<int*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "int64") {
+            py::array_t<int64_t> r(buf.shape);
+            astype<int64_t, float>(src, static_cast<int64_t*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "bool") {
+            py::array_t<bool> r(buf.shape);
+            astype<bool, float>(src, static_cast<bool*>(r.request().ptr), buf.size);
+            return r;
+        }
+    }
+
+    // int32 input
     if (dt.is(py::dtype::of<int>())) {
+        auto* src = static_cast<const int*>(buf.ptr);
+        if (dtype == "float64" || dtype == "double") {
+            py::array_t<double> r(buf.shape);
+            astype<double, int>(src, static_cast<double*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "float32" || dtype == "float") {
+            py::array_t<float> r(buf.shape);
+            astype<float, int>(src, static_cast<float*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "int64") {
+            py::array_t<int64_t> r(buf.shape);
+            astype<int64_t, int>(src, static_cast<int64_t*>(r.request().ptr), buf.size);
+            return r;
+        }
         if (dtype == "bool") {
-            py::array_t<bool> result(buf.shape);
-            astype<bool, int>(static_cast<const int*>(buf.ptr),
-                              static_cast<bool*>(result.request().ptr), buf.size);
-            return result;
+            py::array_t<bool> r(buf.shape);
+            astype<bool, int>(src, static_cast<bool*>(r.request().ptr), buf.size);
+            return r;
         }
     }
+
+    // int64 input
+    if (dt.is(py::dtype::of<int64_t>())) {
+        auto* src = static_cast<const int64_t*>(buf.ptr);
+        if (dtype == "float64" || dtype == "double") {
+            py::array_t<double> r(buf.shape);
+            astype<double, int64_t>(src, static_cast<double*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "float32" || dtype == "float") {
+            py::array_t<float> r(buf.shape);
+            astype<float, int64_t>(src, static_cast<float*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "int" || dtype == "int32") {
+            py::array_t<int> r(buf.shape);
+            astype<int, int64_t>(src, static_cast<int*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "bool") {
+            py::array_t<bool> r(buf.shape);
+            astype<bool, int64_t>(src, static_cast<bool*>(r.request().ptr), buf.size);
+            return r;
+        }
+    }
+
+    // bool input
+    if (dt.is(py::dtype::of<bool>())) {
+        auto* src = static_cast<const bool*>(buf.ptr);
+        if (dtype == "float64" || dtype == "double") {
+            py::array_t<double> r(buf.shape);
+            astype<double, bool>(src, static_cast<double*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "float32" || dtype == "float") {
+            py::array_t<float> r(buf.shape);
+            astype<float, bool>(src, static_cast<float*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "int" || dtype == "int32") {
+            py::array_t<int> r(buf.shape);
+            astype<int, bool>(src, static_cast<int*>(r.request().ptr), buf.size);
+            return r;
+        }
+        if (dtype == "int64") {
+            py::array_t<int64_t> r(buf.shape);
+            astype<int64_t, bool>(src, static_cast<int64_t*>(r.request().ptr), buf.size);
+            return r;
+        }
+    }
+
     throw std::runtime_error("astype: unsupported conversion " + std::string(py::str(dt)) + " -> " + dtype);
 }
 

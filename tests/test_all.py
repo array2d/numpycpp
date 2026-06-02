@@ -471,6 +471,34 @@ def test_astype_bool_from_int(cpp):
     a = np.array([[0, 1, -1], [42, 0, 0]], dtype=np.int32)
     assert_bit_aligned(cpp.astype(a, "bool"), a.astype(bool), "astype_bool_from_int")
 
+def test_astype_f64_to_f32(cpp):
+    a = np.array([1.5, 2.7, -3.1], dtype=np.float64)
+    assert_bit_aligned(cpp.astype(a, "float32"), a.astype(np.float32), "astype_f64_to_f32")
+
+def test_astype_f32_to_f64(cpp):
+    a = np.array([1.5, 2.7, -3.1], dtype=np.float32)
+    assert_bit_aligned(cpp.astype(a, "float64"), a.astype(np.float64), "astype_f32_to_f64")
+
+def test_astype_f64_to_int64(cpp):
+    a = np.array([1.5, 2.7, -3.1], dtype=np.float64)
+    assert_bit_aligned(cpp.astype(a, "int64"), a.astype(np.int64), "astype_f64_to_int64")
+
+def test_astype_int_to_f64(cpp):
+    a = np.array([1, 2, -3], dtype=np.int32)
+    assert_bit_aligned(cpp.astype(a, "float64"), a.astype(np.float64), "astype_int_to_f64")
+
+def test_astype_int_to_f32(cpp):
+    a = np.array([1, 2, -3], dtype=np.int32)
+    assert_bit_aligned(cpp.astype(a, "float32"), a.astype(np.float32), "astype_int_to_f32")
+
+def test_astype_bool_to_f64(cpp):
+    a = np.array([True, False, True], dtype=bool)
+    assert_bit_aligned(cpp.astype(a, "float64"), a.astype(np.float64), "astype_bool_to_f64")
+
+def test_astype_bool_to_int(cpp):
+    a = np.array([True, False, True, False], dtype=bool)
+    assert_bit_aligned(cpp.astype(a, "int"), a.astype(np.int32), "astype_bool_to_int")
+
 def test_truncate_to_float32(cpp):
     a = np.array([1.0 / 3.0, np.pi, np.sqrt(2.0)], dtype=np.float64)
     py_r = a.astype(np.float32).astype(np.float64)
