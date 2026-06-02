@@ -21,6 +21,8 @@
 #include <cmath>
 #include <cstdio>
 #include <dlfcn.h>
+#include <fstream>
+#include <string>
 #include "npy_math_float.h"
 
 #ifdef __AVX512F__
@@ -31,19 +33,49 @@ namespace numpy {
 namespace detail {
 // Internal dispatch namespace — use numpy::exp() etc., not numpy::detail::exp().
 // All math functions are resolved at runtime from numpy's _multiarray_umath.so.
+//
+// The shared library handle is auto-discovered on first use by scanning
+// /proc/self/maps — no explicit bridge_init() call needed.
 
 inline void* g_svml_handle = nullptr;
 
+// Auto-discover numpy's _multiarray_umath shared library path via /proc/self/maps.
+// Called lazily from resolve_svml() on first use.
+inline const char* find_umath_path() {
+    static std::string path;
+    static bool tried = false;
+    if (tried) return path.empty() ? nullptr : path.c_str();
+    tried = true;
+
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    while (std::getline(maps, line)) {
+        if (line.find("_multiarray_umath") != std::string::npos &&
+            line.find(".so") != std::string::npos) {
+            auto pos = line.rfind('/');
+            auto start = line.rfind(' ', pos);
+            if (start != std::string::npos && pos != std::string::npos) {
+                path = line.substr(start + 1);
+                break;
+            }
+        }
+    }
+    return path.empty() ? nullptr : path.c_str();
+}
+
+// DEPRECATED — kept for backward compatibility with code that still calls it.
+// resolve_svml() now auto-discovers the .so path; explicit init is unnecessary.
 inline void bridge_init(const char* numpy_so_path) {
-    static bool initialized = false;
-    if (initialized || !numpy_so_path) return;
-    initialized = true;
-    g_svml_handle = dlopen(numpy_so_path, RTLD_NOLOAD | RTLD_LAZY);
+    (void)numpy_so_path;
 }
 
 inline void* resolve_svml(const char* name) {
-    void* h = g_svml_handle;
-    if (h) return dlsym(h, name);
+    // Lazy init: auto-discover numpy's shared library on first call
+    if (!g_svml_handle) {
+        const char* path = find_umath_path();
+        if (path) g_svml_handle = dlopen(path, RTLD_NOLOAD | RTLD_LAZY);
+    }
+    if (g_svml_handle) return dlsym(g_svml_handle, name);
     return nullptr;
 }
 
