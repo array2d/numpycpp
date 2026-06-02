@@ -736,10 +736,10 @@ def test_unwrap(cpp):
     for dt in [np.float64, np.float32]:
         a = np.array([0.0, 0.5, 0.8, -0.9, -0.5, 0.2], dtype=dt)
         assert_bit_aligned(cpp.unwrap(a), np.unwrap(a), f"unwrap_{dt}")
-    # Large values: numpy uses float64 π internally even for float32 input,
-    # so float32 unwrap is not bit-exact on the correction path. Test float64 only.
-    a2 = np.array([0.0, 2.5, 5.0, -2.5, -5.0], dtype=np.float64) * np.pi
-    assert_bit_aligned(cpp.unwrap(a2), np.unwrap(a2), "unwrap_large")
+    # Large values — bit-exact for both float64 and float32
+    for dt in [np.float64, np.float32]:
+        a2 = np.array([0.0, 2.5, 5.0, -2.5, -5.0], dtype=dt) * np.pi
+        assert_bit_aligned(cpp.unwrap(a2), np.unwrap(a2), f"unwrap_large_{dt.__name__}")
 
 def test_cumsum(cpp):
     for dt in [np.float64, np.float32]:

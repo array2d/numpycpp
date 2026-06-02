@@ -720,17 +720,26 @@ inline double safe_divide(double a, double b, double default_val = 0.0) {
 
 /// numpy.unwrap(p, discont=None, axis=-1)
 /// 1D only: unwrap phase angles by correcting jumps > discont.
+/// Uses numpy's exact computation path: (dd+period/2)%period - period/2
+/// to guarantee bit-identical float32 results.
 template<typename T>
 inline void unwrap(const T* src, T* dst, size_t n, T discont = T(M_PI)) {
     if (n == 0) return;
     T period = T(2) * discont;
+    T p2 = period / T(2);
     dst[0] = src[0];
     T cum_correct = T(0);
     for (size_t i = 1; i < n; ++i) {
         T dd = src[i] - src[i - 1];
         T ph_correct = T(0);
         if (std::abs(dd) >= discont) {
-            T ddmod = dd - std::round(dd / period) * period;
+            // numpy: ddmod = (dd + period/2) % period - period/2
+            // Python-style mod using floor division (numpy's mod):
+            T val = dd + p2;
+            T val_mod = val - std::floor(val / period) * period;
+            T ddmod = val_mod - p2;
+            // boundary_ambiguous: when dd > 0 and ddmod == -period/2, use +period/2
+            if (dd > T(0) && ddmod == -p2) ddmod = p2;
             ph_correct = ddmod - dd;
         }
         cum_correct += ph_correct;
