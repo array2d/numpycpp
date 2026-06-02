@@ -1188,3 +1188,9 @@ class TestEinsumLargeGateMachine:
         assert_bit_aligned(cpp.einsum("ij,ij->i", a, b),
                            np.einsum("ij,ij->i", a, b),
                            f"gate_machine [{n},{dims}]")
+
+
+if __name__ == "__main__":
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.exit(pytest.main([__file__, "-q", "--tb=short", "--no-header"]))
