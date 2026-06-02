@@ -168,10 +168,10 @@ NUMPY_NPY_F64(exp2,  std::exp2(x))
 // f32 exp/log/sin/cos: numpy's own polynomial approximations (npy_math_float.h)
 // are the canonical implementation for float32. dlsym npy_expf/etc. would
 // resolve a different (non-matching) code path. Never use dlsym for these.
-inline float exp_npy_f32(float x)  { return npy_float_math::npy_expf(x); }
-inline float log_npy_f32(float x)  { return npy_float_math::npy_logf(x); }
-inline float sin_npy_f32(float x)  { return npy_float_math::npy_sinf(x); }
-inline float cos_npy_f32(float x)  { return npy_float_math::npy_cosf(x); }
+inline float exp_npy_f32(float x)  { return npy_expf(x); }
+inline float log_npy_f32(float x)  { return npy_logf(x); }
+inline float sin_npy_f32(float x)  { return npy_sinf(x); }
+inline float cos_npy_f32(float x)  { return npy_cosf(x); }
 NUMPY_NPY_F32(tan,   std::tan(x))
 NUMPY_NPY_F32(asin,  std::asin(x))
 NUMPY_NPY_F32(acos,  std::acos(x))

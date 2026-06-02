@@ -1,6 +1,9 @@
 // INTERNAL HEADER — DO NOT INCLUDE DIRECTLY.
 // Use #include "numpy/core.h" which pulls this in automatically.
 //
+// All functions live in numpy::detail — do not call directly.
+// Use numpy::exp() etc. from core.h.
+//
 // Bit-exact float32 math matching numpy 1.23.5 SIMD polynomial approximations.
 // Replicates numpy's simd_exp_FLOAT, simd_log_FLOAT, simd_sincos_f32 algorithms.
 
@@ -11,7 +14,10 @@
 #include <cmath>
 
 namespace numpy {
-namespace npy_float_math {
+namespace detail {
+// Float32 bit-exact polynomial approximations — internal detail, do not use directly.
+// These replicate numpy's simd_exp_FLOAT, simd_log_FLOAT, simd_sincos_f32 algorithms.
+// Public API: use numpy::exp() etc. from core.h.
 
 namespace {
 
@@ -279,5 +285,5 @@ inline float npy_cosf(float x) {
 }
 
 } // anonymous namespace
-} // namespace npy_float_math
+} // namespace detail
 } // namespace numpy
