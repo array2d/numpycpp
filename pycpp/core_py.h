@@ -756,6 +756,18 @@ inline void slice_assign(py::array_t<bool> arr, py::ssize_t start, bool value) {
 // Binary element-wise — numpy.arctan2, maximum, minimum
 // ============================================================================
 
+/// numpy.hypot(x1, x2, /, out=None, *, where=True, ...) — array-array
+template<typename T>
+py::array_t<T> hypot(const py::array_t<T>& a, const py::array_t<T>& b) {
+    auto ba = a.request(), bb = b.request();
+    py::array_t<T> result(ba.shape);
+    hypot_array(static_cast<const T*>(ba.ptr),
+                        static_cast<const T*>(bb.ptr),
+                        static_cast<T*>(result.request().ptr),
+                        std::min(ba.size, bb.size));
+    return result;
+}
+
 /// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 py::array_t<T> arctan2(const py::array_t<T>& a, const py::array_t<T>& b) {

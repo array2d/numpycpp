@@ -159,6 +159,8 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("slice_assign", static_cast<void(*)(py::array_t<bool>, py::ssize_t, bool)>(&numpy::slice_assign));
 
     // -- Binary element-wise: scalar overloads BEFORE array-array ----------
+    m.def("hypot", static_cast<py::array_t<double>(*)(const py::array_t<double>&, const py::array_t<double>&)>(&numpy::hypot));
+    m.def("hypot", static_cast<py::array_t<float>(*)(const py::array_t<float>&, const py::array_t<float>&)>(&numpy::hypot));
     m.def("arctan2", static_cast<py::array_t<float>(*)(const py::array_t<float>&, float)>(&numpy::arctan2));
     m.def("arctan2", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double)>(&numpy::arctan2));
     m.def("arctan2", static_cast<py::array_t<double>(*)(const py::array_t<double>&, const py::array_t<double>&)>(&numpy::arctan2));

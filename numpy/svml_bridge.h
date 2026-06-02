@@ -14,7 +14,7 @@
 // AVX-512 intrinsics are isolated behind __attribute__((target("avx512f")))
 // so the binary is safe on non-AVX-512 CPUs — no SIGILL.
 //
-// Call bridge_init(path_to_multiarray_umath_so) before first use.
+// The .so path is auto-discovered via /proc/self/maps — no manual init needed.
 
 #pragma once
 
@@ -212,6 +212,10 @@ NUMPY_NPY_F32(log10, std::log10(x))
 NUMPY_NPY_F32(log2,  std::log2(x))
 NUMPY_NPY_F32(exp2,  std::exp2(x))
 
+// hypot — numpy matches libm bit-exact for both f32 and f64
+inline double hypot_f64(double x, double y) { return std::hypot(x, y); }
+inline float  hypot_f32(float x, float y)   { return std::hypot(x, y); }
+
 inline double pow_npy_f64(double x, double e) {
     static auto fn = (double (*)(double, double))resolve_svml("npy_pow");
     if (fn) return fn(x, e);
@@ -327,6 +331,7 @@ template<> struct svml_impl<T> {                                     \
     static T sqrt(T x) { return sqrt_##suff(x); }                    \
     static T pow(T x, T e)    { return pow_##suff(x, e); }           \
     static T atan2(T y, T x)  { return atan2_##suff(y, x); }         \
+    static T hypot(T x, T y)  { return hypot_##suff(x, y); }         \
 };
 
 template<typename T> struct svml_impl;
@@ -354,6 +359,7 @@ NUMPY_SVML_D1(sqrt)
 // 2-arg dispatchers
 template<typename T> inline T pow(T x, T e)    { return svml_impl<T>::pow(x, e); }
 template<typename T> inline T atan2(T y, T x)  { return svml_impl<T>::atan2(y, x); }
+template<typename T> inline T hypot(T x, T y)  { return svml_impl<T>::hypot(x, y); }
 
 } // namespace detail
 } // namespace numpy

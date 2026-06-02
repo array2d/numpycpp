@@ -411,6 +411,12 @@ inline void isfinite(const T* src, bool* dst, size_t n) {
 // Binary element-wise — 2 arrays T in → T out
 // ============================================================================
 
+/// numpy.hypot(x1, x2, /, out=None, *, where=True, ...) — array-array
+template<typename T>
+inline void hypot_array(const T* a, const T* b, T* dst, size_t n) {
+    NUMPY_UNROLL4(i, dst[i] = detail::hypot(a[i], b[i]));
+}
+
 /// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
 inline void arctan2_array(const T* a, const T* b, T* dst, size_t n) {

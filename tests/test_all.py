@@ -732,6 +732,12 @@ def test_flatnonzero(cpp):
     a2 = np.array([0.0, 0.0, 0.0])
     assert_bit_aligned(cpp.flatnonzero(a2), np.flatnonzero(a2), "flatnonzero zeros")
 
+def test_hypot(cpp):
+    for dt in [np.float64, np.float32]:
+        x = np.array([3.0, 1.0, 5.0, 0.0, 1e10], dtype=dt)
+        y = np.array([4.0, 1.0, 12.0, 5.0, 1e10], dtype=dt)
+        assert_bit_aligned(cpp.hypot(x, y), np.hypot(x, y), f"hypot_{dt}")
+
 def test_unwrap(cpp):
     for dt in [np.float64, np.float32]:
         a = np.array([0.0, 0.5, 0.8, -0.9, -0.5, 0.2], dtype=dt)
