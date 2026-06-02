@@ -1018,42 +1018,46 @@ inline py::array_t<py::ssize_t> flatnonzero(const py::array_t<double>& arr) {
 }
 
 /// numpy.unwrap(p, discont=None, axis=-1) — 1D only
-inline py::array_t<double> unwrap(const py::array_t<double>& arr, double discont = M_PI) {
+template<typename T>
+py::array_t<T> unwrap(const py::array_t<T>& arr, T discont = T(M_PI)) {
     auto buf = arr.request();
-    py::array_t<double> result(buf.shape);
-    numpy::unwrap(static_cast<const double*>(buf.ptr),
-                  static_cast<double*>(result.request().ptr), buf.size, discont);
+    py::array_t<T> result(buf.shape);
+    numpy::unwrap(static_cast<const T*>(buf.ptr),
+                  static_cast<T*>(result.request().ptr), buf.size, discont);
     return result;
 }
 
 /// numpy.cumsum(a, axis=None) — 1D cumulative sum
-inline py::array_t<double> cumsum(const py::array_t<double>& arr) {
+template<typename T>
+py::array_t<T> cumsum(const py::array_t<T>& arr) {
     auto buf = arr.request();
-    py::array_t<double> result(buf.shape);
-    numpy::cumsum(static_cast<const double*>(buf.ptr),
-                  static_cast<double*>(result.request().ptr), buf.size);
+    py::array_t<T> result(buf.shape);
+    numpy::cumsum(static_cast<const T*>(buf.ptr),
+                  static_cast<T*>(result.request().ptr), buf.size);
     return result;
 }
 
 /// numpy.squeeze(a, axis=None) — remove axes of length 1
-inline py::array_t<double> squeeze(const py::array_t<double>& arr) {
+template<typename T>
+py::array_t<T> squeeze(const py::array_t<T>& arr) {
     auto buf = arr.request();
     std::vector<py::ssize_t> new_shape;
     for (auto s : buf.shape)
         if (s != 1) new_shape.push_back(s);
     if (new_shape.empty()) new_shape.push_back(1);
-    py::array_t<double> result(new_shape);
-    std::memcpy(result.request().ptr, buf.ptr, buf.size * sizeof(double));
+    py::array_t<T> result(new_shape);
+    std::memcpy(result.request().ptr, buf.ptr, buf.size * sizeof(T));
     return result;
 }
 
 /// numpy.intersect1d(ar1, ar2, assume_unique=False, return_indices=False)
-inline py::array_t<double> intersect1d(const py::array_t<double>& a, const py::array_t<double>& b) {
+template<typename T>
+py::array_t<T> intersect1d(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();
     auto inter = intersect1d(
-        static_cast<const double*>(ba.ptr), ba.size,
-        static_cast<const double*>(bb.ptr), bb.size);
-    return py::array_t<double>(inter.size(), inter.data());
+        static_cast<const T*>(ba.ptr), ba.size,
+        static_cast<const T*>(bb.ptr), bb.size);
+    return py::array_t<T>(inter.size(), inter.data());
 }
 
 // ============================================================================

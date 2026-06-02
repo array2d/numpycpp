@@ -733,31 +733,38 @@ def test_flatnonzero(cpp):
     assert_bit_aligned(cpp.flatnonzero(a2), np.flatnonzero(a2), "flatnonzero zeros")
 
 def test_unwrap(cpp):
-    a = np.array([0.0, 0.5, 0.8, -0.9, -0.5, 0.2])
-    assert_bit_aligned(cpp.unwrap(a), np.unwrap(a), "unwrap")
-    a2 = np.array([0.0, 2.5, 5.0, -2.5, -5.0]) * np.pi
+    for dt in [np.float64, np.float32]:
+        a = np.array([0.0, 0.5, 0.8, -0.9, -0.5, 0.2], dtype=dt)
+        assert_bit_aligned(cpp.unwrap(a), np.unwrap(a), f"unwrap_{dt}")
+    # Large values: numpy uses float64 π internally even for float32 input,
+    # so float32 unwrap is not bit-exact on the correction path. Test float64 only.
+    a2 = np.array([0.0, 2.5, 5.0, -2.5, -5.0], dtype=np.float64) * np.pi
     assert_bit_aligned(cpp.unwrap(a2), np.unwrap(a2), "unwrap_large")
 
 def test_cumsum(cpp):
-    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-    assert_bit_aligned(cpp.cumsum(a), np.cumsum(a), "cumsum")
-    a2 = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
-    assert_bit_aligned(cpp.cumsum(a2), np.cumsum(a2), "cumsum_frac")
-    a3 = np.array([-1.0, 2.0, -3.0, 4.0])
-    assert_bit_aligned(cpp.cumsum(a3), np.cumsum(a3), "cumsum_neg")
+    for dt in [np.float64, np.float32]:
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dt)
+        assert_bit_aligned(cpp.cumsum(a), np.cumsum(a), f"cumsum_{dt}")
+        a2 = np.array([0.1, 0.2, 0.3, 0.4, 0.5], dtype=dt)
+        assert_bit_aligned(cpp.cumsum(a2), np.cumsum(a2), f"cumsum_frac_{dt}")
+        a3 = np.array([-1.0, 2.0, -3.0, 4.0], dtype=dt)
+        assert_bit_aligned(cpp.cumsum(a3), np.cumsum(a3), f"cumsum_neg_{dt}")
 
 def test_squeeze(cpp):
-    a = np.array([1.0, 2.0, 3.0]).reshape(3, 1)
-    assert_bit_aligned(cpp.squeeze(a), np.squeeze(a), "squeeze_col")
-    a2 = np.array([1.0, 2.0, 3.0]).reshape(1, 3)
-    assert_bit_aligned(cpp.squeeze(a2), np.squeeze(a2), "squeeze_row")
-    a3 = np.array([1.0, 2.0, 3.0, 4.0]).reshape(1, 2, 1, 2, 1)
-    assert_bit_aligned(cpp.squeeze(a3), np.squeeze(a3), "squeeze_multi")
+    for dt in [np.float64, np.float32]:
+        a = np.array([1.0, 2.0, 3.0], dtype=dt).reshape(3, 1)
+        assert_bit_aligned(cpp.squeeze(a), np.squeeze(a), f"squeeze_col_{dt}")
+        a2 = np.array([1.0, 2.0, 3.0], dtype=dt).reshape(1, 3)
+        assert_bit_aligned(cpp.squeeze(a2), np.squeeze(a2), f"squeeze_row_{dt}")
+        a3 = np.array([1.0, 2.0, 3.0, 4.0], dtype=dt).reshape(1, 2, 1, 2, 1)
+        assert_bit_aligned(cpp.squeeze(a3), np.squeeze(a3), f"squeeze_multi_{dt}")
 
 def test_intersect1d(cpp):
-    a, b = np.array([1.0, 2.0, 3.0, 4.0]), np.array([3.0, 4.0, 5.0, 6.0])
-    cpp_r = np.sort(np.asarray(cpp.intersect1d(a, b)))
-    assert_bit_aligned(cpp_r, np.intersect1d(a, b), "intersect1d")
+    for dt in [np.float64, np.float32]:
+        a = np.array([1.0, 2.0, 3.0, 4.0], dtype=dt)
+        b = np.array([3.0, 4.0, 5.0, 6.0], dtype=dt)
+        cpp_r = np.sort(np.asarray(cpp.intersect1d(a, b)))
+        assert_bit_aligned(cpp_r, np.intersect1d(a, b), f"intersect1d_{dt}")
 
 def test_interp_basic(cpp):
     xp = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
