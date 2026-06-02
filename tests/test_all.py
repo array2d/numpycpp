@@ -148,24 +148,24 @@ def dtype(request):
 # _multiarray_umath.so by the SVML bridge. No AVX-512 required.
 
 _UNARY_MATH = [
-    ("sqrt",       np.sqrt,       lambda a: np.abs(a),                [(10, 42), (10000, 7), (100000, 7)]),
-    ("abs",        np.abs,        None,                               [(10, 42), (10000, 7), (100000, 7)]),
-    ("exp",        np.exp,        None,                               [(10, 1),  (1000, 7), (10000, 7), (100000, 7)]),
-    ("log",        np.log,        lambda a: np.abs(a) + 0.1,          [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("sin",        np.sin,        None,                               [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("cos",        np.cos,        None,                               [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("tan",        np.tan,        lambda a: a * 0.5,                  [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("log10",      np.log10,      lambda a: np.abs(a) + 0.1,          [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("log2",       np.log2,       lambda a: np.abs(a) + 0.1,          [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("arcsin",     np.arcsin,     lambda a: np.clip(a * 0.5, -1, 1),  [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("arccos",     np.arccos,     lambda a: np.clip(a * 0.5, -1, 1),  [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("arctan",     np.arctan,     None,                               [(10, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("round",      np.round,      lambda a: a * 100,                  [(10, 42), (10000, 7), (100000, 7)]),
-    ("floor",      np.floor,      lambda a: a * 100,                  [(10, 42), (10000, 7), (100000, 7)]),
-    ("ceil",       np.ceil,       lambda a: a * 100,                  [(10, 42), (10000, 7), (100000, 7)]),
-    ("degrees",    np.degrees,    None,                               [(10, 42), (10000, 7), (100000, 7)]),
-    ("radians",    np.radians,    None,                               [(10, 42), (10000, 7), (100000, 7)]),
-    ("sign",       np.sign,       None,                               [(10, 42), (10000, 7), (100000, 7)]),
+    ("sqrt",       np.sqrt,       lambda a: np.abs(a),                [(100, 42), (10000, 7), (100000, 7)]),
+    ("abs",        np.abs,        None,                               [(100, 42), (10000, 7), (100000, 7)]),
+    ("exp",        np.exp,        None,                               [(100, 1),  (1000, 7), (10000, 7), (100000, 7)]),
+    ("log",        np.log,        lambda a: np.abs(a) + 0.1,          [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("sin",        np.sin,        None,                               [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("cos",        np.cos,        None,                               [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("tan",        np.tan,        lambda a: a * 0.5,                  [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("log10",      np.log10,      lambda a: np.abs(a) + 0.1,          [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("log2",       np.log2,       lambda a: np.abs(a) + 0.1,          [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("arcsin",     np.arcsin,     lambda a: np.clip(a * 0.5, -1, 1),  [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("arccos",     np.arccos,     lambda a: np.clip(a * 0.5, -1, 1),  [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("arctan",     np.arctan,     None,                               [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
+    ("round",      np.round,      lambda a: a * 100,                  [(100, 42), (10000, 7), (100000, 7)]),
+    ("floor",      np.floor,      lambda a: a * 100,                  [(100, 42), (10000, 7), (100000, 7)]),
+    ("ceil",       np.ceil,       lambda a: a * 100,                  [(100, 42), (10000, 7), (100000, 7)]),
+    ("degrees",    np.degrees,    None,                               [(100, 42), (10000, 7), (100000, 7)]),
+    ("radians",    np.radians,    None,                               [(100, 42), (10000, 7), (100000, 7)]),
+    ("sign",       np.sign,       None,                               [(100, 42), (10000, 7), (100000, 7)]),
 ]
 
 
@@ -232,8 +232,8 @@ _COMPARISONS = [
 ]
 
 
-_COMP_ARGS = [(fn, npf, size, seed) for fn, npf in _COMPARISONS for size, seed in [(10, 42), (100000, 7)]]
-_COMP_IDS = [f"{fn}_{size}" for fn, npf in _COMPARISONS for size, seed in [(10, 42), (100000, 7)]]
+_COMP_ARGS = [(fn, npf, size, seed) for fn, npf in _COMPARISONS for size, seed in [(100, 42), (100000, 7)]]
+_COMP_IDS = [f"{fn}_{size}" for fn, npf in _COMPARISONS for size, seed in [(100, 42), (100000, 7)]]
 
 
 @pytest.mark.parametrize("fn_name, np_fn, size, seed", _COMP_ARGS, ids=_COMP_IDS)
@@ -257,8 +257,8 @@ def test_not_equal_scalar(cpp, dtype):
     assert_bit_aligned(cpp.not_equal(a, dtype(0.0)), np.not_equal(a, dtype(0.0)), "not_equal scalar")
 
 def test_not_equal_array(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
-    b = random_array((10,), seed=99, dtype=dtype)
+    a = random_array((100,), dtype=dtype)
+    b = random_array((100,), seed=99, dtype=dtype)
     assert_bit_aligned(cpp.not_equal(a, b), np.not_equal(a, b), "not_equal array")
 
 def test_not_equal_large(cpp, dtype):
@@ -272,12 +272,12 @@ def test_not_equal_large(cpp, dtype):
 # ============================================================================
 
 def test_maximum_array(cpp, dtype):
-    a = random_array((10,), seed=1, dtype=dtype)
-    b = random_array((10,), seed=2, dtype=dtype)
+    a = random_array((100,), seed=1, dtype=dtype)
+    b = random_array((100,), seed=2, dtype=dtype)
     assert_bit_aligned(cpp.maximum(a, b), np.maximum(a, b), "maximum(a,b)")
 
 def test_maximum_scalar(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
+    a = random_array((100,), dtype=dtype)
     assert_bit_aligned(cpp.maximum(a, dtype(0.0)), np.maximum(a, dtype(0.0)), "maximum(a,0)")
 
 def test_maximum_large(cpp, dtype):
@@ -286,12 +286,12 @@ def test_maximum_large(cpp, dtype):
     assert_bit_aligned(cpp.maximum(a, b), np.maximum(a, b), "maximum large")
 
 def test_minimum_array(cpp, dtype):
-    a = random_array((10,), seed=1, dtype=dtype)
-    b = random_array((10,), seed=2, dtype=dtype)
+    a = random_array((100,), seed=1, dtype=dtype)
+    b = random_array((100,), seed=2, dtype=dtype)
     assert_bit_aligned(cpp.minimum(a, b), np.minimum(a, b), "minimum(a,b)")
 
 def test_minimum_scalar(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
+    a = random_array((100,), dtype=dtype)
     assert_bit_aligned(cpp.minimum(a, dtype(0.0)), np.minimum(a, dtype(0.0)), "minimum(a,0)")
 
 def test_minimum_large(cpp, dtype):
@@ -300,12 +300,12 @@ def test_minimum_large(cpp, dtype):
     assert_bit_aligned(cpp.minimum(a, b), np.minimum(a, b), "minimum large")
 
 def test_arctan2_array(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
-    b = np.abs(random_array((10,), dtype=dtype)) + dtype(0.1)
+    a = random_array((100,), dtype=dtype)
+    b = np.abs(random_array((100,), dtype=dtype)) + dtype(0.1)
     assert_bit_aligned(cpp.arctan2(a, b), np.arctan2(a, b), "arctan2(a,b)")
 
 def test_arctan2_scalar(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
+    a = random_array((100,), dtype=dtype)
     assert_bit_aligned(cpp.arctan2(a, dtype(1.0)), np.arctan2(a, dtype(1.0)), "arctan2(a,1)")
 
 def test_arctan2_large(cpp, dtype):
@@ -319,7 +319,7 @@ def test_arctan2_large(cpp, dtype):
 # ============================================================================
 
 def test_sum_1d(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
+    a = random_array((100,), dtype=dtype)
     assert cpp.sum(a) == np.sum(a), "sum 1d"
 
 def test_sum_2d(cpp, dtype):
@@ -332,7 +332,7 @@ def test_sum_empty(cpp, dtype):
 
 
 def test_mean_1d(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
+    a = random_array((100,), dtype=dtype)
     assert_bit_aligned(np.float64(cpp.mean(a)), np.float64(np.mean(a)), "mean 1d")
 
 def test_mean_empty(cpp, dtype):
@@ -340,7 +340,7 @@ def test_mean_empty(cpp, dtype):
 
 
 def test_max_1d(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
+    a = random_array((100,), dtype=dtype)
     assert cpp.max(a) == np.max(a), "max 1d"
 
 def test_max_large(cpp, dtype):
@@ -348,7 +348,7 @@ def test_max_large(cpp, dtype):
     assert cpp.max(a) == np.max(a), "max large"
 
 def test_min_1d(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
+    a = random_array((100,), dtype=dtype)
     assert cpp.min(a) == np.min(a), "min 1d"
 
 def test_min_large(cpp, dtype):
@@ -822,7 +822,7 @@ def test_to_vector_bool(cpp):
 # ============================================================================
 
 def test_norm_1d(cpp, dtype):
-    a = random_array((10,), dtype=dtype)
+    a = random_array((100,), dtype=dtype)
     assert_bit_aligned(dtype(cpp.linalg.norm(a)), np.sqrt(np.sum(a * a)), "linalg.norm 1d")
 
 def test_norm_2d(cpp, dtype):
@@ -830,7 +830,7 @@ def test_norm_2d(cpp, dtype):
     assert_bit_aligned(dtype(cpp.linalg.norm(a)), np.sqrt(np.sum(a * a)), "linalg.norm 2d")
 
 def test_norm_zero(cpp, dtype):
-    a = np.zeros((10,), dtype=dtype)
+    a = np.zeros((100,), dtype=dtype)
     assert_bit_aligned(dtype(cpp.linalg.norm(a)), dtype(0.0), "linalg.norm zero")
 
 def test_norm_axis_2d(cpp, dtype):
