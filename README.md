@@ -15,7 +15,7 @@ We created `numpycpp` to keep NumPy's familiar usage patterns while letting C++ 
 
 `numpycpp` is a **header-only C++ library** implementing numpy's core API (`numpy.*`, `numpy.linalg.*`, `numpy.einsum`) with **bit-level precision alignment**. Raw pointer + size interface. Zero external dependencies — pure C++17 standard library.
 
-All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (460 tests, float64 + float32).
+All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (468 tests, float64 + float32).
 
 **Bit-exact math** is achieved by resolving numpy's own math functions from `_multiarray_umath.so` at runtime. The SVML bridge auto-detects your CPU and selects the same path numpy uses: AVX‑512 SVML (`__svml_exp8`) when available, or scalar `npy_exp`/`npy_log`/etc. otherwise. AVX‑512 intrinsics are isolated behind `__attribute__((target))` — the binary is safe on any x86_64 CPU (no SIGILL). Every transcendental function produces the exact same IEEE 754 bits as numpy on **all architectures**.
 
@@ -89,12 +89,12 @@ Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly
 ### Testing
 
 The test suite verifies **bit-level precision alignment** between every C++ function and Python numpy.
-No tolerance, no `atol`/`rtol` — raw IEEE 754 bits must match exactly. 460 tests, float64 + float32.
+No tolerance, no `atol`/`rtol` — raw IEEE 754 bits must match exactly. 468 tests, float64 + float32.
 
 ```bash
 cd tests
 make                    # compile C++ test module
-make test               # run all 460 tests (silent mode: only failures print)
+make test               # run all 468 tests (silent mode: only failures print)
 ```
 
 To run with verbose output:
@@ -142,7 +142,7 @@ LDFLAGS   = -shared -ldl
 ### Alignment status
 
 The table below reflects the current bit-level parity between `numpycpp` C++ and Python numpy.
-All 460 tests pass under strict IEEE 754 bit comparison (float64 + float32).
+All 468 tests pass under strict IEEE 754 bit comparison (float64 + float32).
 
 ✅ = bit-exact on ALL architectures (SVML bridge with runtime CPU dispatch).
 
@@ -189,7 +189,7 @@ numpycpp/
 │   └── einsum_py.h
 ├── tests/              # bit-level precision tests + test module
 │   ├── module.cpp      # pybind11 module for testing
-│   ├── test_all.py     # single entry — all APIs, 460 tests, float64+float32
+│   ├── test_all.py     # single entry — all APIs, 468 tests, float64+float32
 │   ├── conftest.py     # silent-mode output suppression
 │   └── Makefile
 ├── CMakeLists.txt      # build & .deb packaging

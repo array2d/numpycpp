@@ -710,6 +710,22 @@ def test_unwrap(cpp):
     a2 = np.array([0.0, 2.5, 5.0, -2.5, -5.0]) * np.pi
     assert_bit_aligned(cpp.unwrap(a2), np.unwrap(a2), "unwrap_large")
 
+def test_cumsum(cpp):
+    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    assert_bit_aligned(cpp.cumsum(a), np.cumsum(a), "cumsum")
+    a2 = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+    assert_bit_aligned(cpp.cumsum(a2), np.cumsum(a2), "cumsum_frac")
+    a3 = np.array([-1.0, 2.0, -3.0, 4.0])
+    assert_bit_aligned(cpp.cumsum(a3), np.cumsum(a3), "cumsum_neg")
+
+def test_squeeze(cpp):
+    a = np.array([1.0, 2.0, 3.0]).reshape(3, 1)
+    assert_bit_aligned(cpp.squeeze(a), np.squeeze(a), "squeeze_col")
+    a2 = np.array([1.0, 2.0, 3.0]).reshape(1, 3)
+    assert_bit_aligned(cpp.squeeze(a2), np.squeeze(a2), "squeeze_row")
+    a3 = np.array([1.0, 2.0, 3.0, 4.0]).reshape(1, 2, 1, 2, 1)
+    assert_bit_aligned(cpp.squeeze(a3), np.squeeze(a3), "squeeze_multi")
+
 def test_intersect1d(cpp):
     a, b = np.array([1.0, 2.0, 3.0, 4.0]), np.array([3.0, 4.0, 5.0, 6.0])
     cpp_r = np.sort(np.asarray(cpp.intersect1d(a, b)))

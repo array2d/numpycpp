@@ -54,6 +54,7 @@ py::array_t<T> empty_like(const py::array_t<T>& arr) {
 }
 
 /// numpy.zeros(shape, dtype=float, order='C', *, like=None)
+/// NOTE: convenient double default. For dtype flexibility, use zeros_t<T>(shape).
 inline py::array_t<double> zeros(const std::vector<py::ssize_t>& shape) {
     py::array_t<double> result(shape);
     zeros_like(static_cast<double*>(result.request().ptr), result.request().size);
@@ -71,6 +72,29 @@ inline py::array_t<double> ones(const std::vector<py::ssize_t>& shape) {
 inline py::array_t<double> full(const std::vector<py::ssize_t>& shape, double fill_value) {
     py::array_t<double> result(shape);
     numpy::full(static_cast<double*>(result.request().ptr), result.request().size, fill_value);
+    return result;
+}
+
+// Template counterparts — dtype-flexible creation for pybind11 modules
+// that need float32 or other dtypes. Bind as e.g. m.def("zeros_f32", &numpy::zeros_t<float>);
+template<typename T>
+py::array_t<T> zeros_t(const std::vector<py::ssize_t>& shape) {
+    py::array_t<T> result(shape);
+    zeros_like(static_cast<T*>(result.request().ptr), result.request().size);
+    return result;
+}
+
+template<typename T>
+py::array_t<T> ones_t(const std::vector<py::ssize_t>& shape) {
+    py::array_t<T> result(shape);
+    ones_like(static_cast<T*>(result.request().ptr), result.request().size);
+    return result;
+}
+
+template<typename T>
+py::array_t<T> full_t(const std::vector<py::ssize_t>& shape, T fill_value) {
+    py::array_t<T> result(shape);
+    numpy::full(static_cast<T*>(result.request().ptr), result.request().size, fill_value);
     return result;
 }
 
@@ -910,6 +934,27 @@ inline py::array_t<double> unwrap(const py::array_t<double>& arr, double discont
     py::array_t<double> result(buf.shape);
     numpy::unwrap(static_cast<const double*>(buf.ptr),
                   static_cast<double*>(result.request().ptr), buf.size, discont);
+    return result;
+}
+
+/// numpy.cumsum(a, axis=None) — 1D cumulative sum
+inline py::array_t<double> cumsum(const py::array_t<double>& arr) {
+    auto buf = arr.request();
+    py::array_t<double> result(buf.shape);
+    numpy::cumsum(static_cast<const double*>(buf.ptr),
+                  static_cast<double*>(result.request().ptr), buf.size);
+    return result;
+}
+
+/// numpy.squeeze(a, axis=None) — remove axes of length 1
+inline py::array_t<double> squeeze(const py::array_t<double>& arr) {
+    auto buf = arr.request();
+    std::vector<py::ssize_t> new_shape;
+    for (auto s : buf.shape)
+        if (s != 1) new_shape.push_back(s);
+    if (new_shape.empty()) new_shape.push_back(1);
+    py::array_t<double> result(new_shape);
+    std::memcpy(result.request().ptr, buf.ptr, buf.size * sizeof(double));
     return result;
 }
 

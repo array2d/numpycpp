@@ -738,6 +738,17 @@ inline void unwrap(const T* src, T* dst, size_t n, T discont = T(M_PI)) {
     }
 }
 
+/// numpy.cumsum(a, axis=None, dtype=None, out=None)
+/// 1D cumulative sum: dst[i] = sum_{j=0}^{i} src[j]
+template<typename T>
+inline void cumsum(const T* src, T* dst, size_t n) {
+    if (n == 0) return;
+    dst[0] = src[0];
+    for (size_t i = 1; i < n; ++i) {
+        dst[i] = dst[i-1] + src[i];
+    }
+}
+
 // ============================================================================
 // astype conversions
 // ============================================================================
