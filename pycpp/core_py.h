@@ -74,63 +74,73 @@ inline py::array_t<double> full(const std::vector<py::ssize_t>& shape, double fi
     return result;
 }
 
-// Bool specializations
-// NOTE: _bool suffix — dtype-specific wrappers; pybind11 cannot deduce template
-// argument from a Python dtype keyword, so each dtype needs its own binding.
-inline py::array_t<bool> full_like_bool(const py::array_t<double>& arr, bool fill_value) {
+// Bool specializations — return-type disambiguation via dtype parameter
+// where pybind11 cannot distinguish overloads by return type alone.
+//
+// full_like(arr, bool_val): bool fill_value naturally disambiguates from
+// the template full_like(arr, T val) where T=double/float.
+// zeros_like(arr, dtype_str) / ones_like(arr, dtype_str): string dtype
+// parameter mirrors numpy's dtype= kwarg for disambiguation.
+inline py::array_t<bool> full_like(const py::array_t<double>& arr, bool fill_value) {
     auto buf = arr.request();
     py::array_t<bool> result(buf.shape);
     std::fill_n(static_cast<bool*>(result.request().ptr), buf.size, fill_value);
     return result;
 }
 
-inline py::array_t<bool> zeros_like_bool(const py::array_t<double>& arr) {
+inline py::array zeros_like(const py::array& arr, const std::string& dtype) {
     auto buf = arr.request();
-    py::array_t<bool> result(buf.shape);
-    std::fill_n(static_cast<bool*>(result.request().ptr), buf.size, false);
-    return result;
+    if (dtype == "bool") {
+        py::array_t<bool> result(buf.shape);
+        std::fill_n(static_cast<bool*>(result.request().ptr), buf.size, false);
+        return result;
+    }
+    throw std::runtime_error("unsupported dtype: " + dtype);
 }
 
-inline py::array_t<bool> ones_like_bool(const py::array_t<double>& arr) {
+inline py::array ones_like(const py::array& arr, const std::string& dtype) {
     auto buf = arr.request();
-    py::array_t<bool> result(buf.shape);
-    std::fill_n(static_cast<bool*>(result.request().ptr), buf.size, true);
-    return result;
+    if (dtype == "bool") {
+        py::array_t<bool> result(buf.shape);
+        std::fill_n(static_cast<bool*>(result.request().ptr), buf.size, true);
+        return result;
+    }
+    throw std::runtime_error("unsupported dtype: " + dtype);
 }
 
 // ============================================================================
 // astype — ndarray.astype(dtype, order='K', casting='unsafe', subok=True, copy=True)
-//
-// NOTE: wrappers use distinct names (astype_int, astype_bool, astype_bool_from_int)
-// instead of a single "astype" because pybind11 cannot resolve overloads that differ
-// only by return type. Each (Tout, Tin) combination needs its own Python binding.
 // ============================================================================
 
-/// ndarray.astype(int) — float64 → int
-inline py::array_t<int> astype_int(const py::array_t<double>& arr) {
+/// ndarray.astype(dtype) — unified dtype dispatch
+inline py::array astype(const py::array& arr, const std::string& dtype) {
     auto buf = arr.request();
-    py::array_t<int> result(buf.shape);
-    astype<int, double>(static_cast<const double*>(buf.ptr),
-                        static_cast<int*>(result.request().ptr), buf.size);
-    return result;
-}
-
-/// ndarray.astype(bool) — float64 → bool
-inline py::array_t<bool> astype_bool(const py::array_t<double>& arr) {
-    auto buf = arr.request();
-    py::array_t<bool> result(buf.shape);
-    astype<bool, double>(static_cast<const double*>(buf.ptr),
-                         static_cast<bool*>(result.request().ptr), buf.size);
-    return result;
-}
-
-/// ndarray.astype(bool) — int → bool
-inline py::array_t<bool> astype_bool_from_int(const py::array_t<int>& arr) {
-    auto buf = arr.request();
-    py::array_t<bool> result(buf.shape);
-    astype<bool, int>(static_cast<const int*>(buf.ptr),
-                      static_cast<bool*>(result.request().ptr), buf.size);
-    return result;
+    auto dt = arr.dtype();
+    // float64 input
+    if (dt.is(py::dtype::of<double>())) {
+        if (dtype == "int" || dtype == "int32" || dtype == "int64") {
+            py::array_t<int> result(buf.shape);
+            astype<int, double>(static_cast<const double*>(buf.ptr),
+                                static_cast<int*>(result.request().ptr), buf.size);
+            return result;
+        }
+        if (dtype == "bool") {
+            py::array_t<bool> result(buf.shape);
+            astype<bool, double>(static_cast<const double*>(buf.ptr),
+                                 static_cast<bool*>(result.request().ptr), buf.size);
+            return result;
+        }
+    }
+    // int input
+    if (dt.is(py::dtype::of<int>())) {
+        if (dtype == "bool") {
+            py::array_t<bool> result(buf.shape);
+            astype<bool, int>(static_cast<const int*>(buf.ptr),
+                              static_cast<bool*>(result.request().ptr), buf.size);
+            return result;
+        }
+    }
+    throw std::runtime_error("astype: unsupported conversion " + std::string(py::str(dt)) + " -> " + dtype);
 }
 
 /// float64 → float32 → float64 roundtrip (precision testing helper)

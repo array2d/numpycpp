@@ -65,9 +65,11 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("full_like", static_cast<py::array_t<float>(*)(const py::array_t<float>&, float)>(&numpy::full_like));
     // NOTE: _bool suffix — dtype-specific wrappers needed because pybind11
     // cannot deduce template argument from a Python dtype keyword.
-    m.def("full_like_bool", &numpy::full_like_bool);
-    m.def("zeros_like_bool", &numpy::zeros_like_bool);
-    m.def("ones_like_bool", &numpy::ones_like_bool);
+    m.def("full_like", static_cast<py::array_t<bool>(*)(const py::array_t<double>&, bool)>(&numpy::full_like));
+    m.def("zeros_like", static_cast<py::array(*)(const py::array&, const std::string&)>(&numpy::zeros_like),
+          py::arg("arr"), py::arg("dtype"));
+    m.def("ones_like", static_cast<py::array(*)(const py::array&, const std::string&)>(&numpy::ones_like),
+          py::arg("arr"), py::arg("dtype"));
     m.def("zeros", &numpy::zeros);
     m.def("ones", &numpy::ones);
 	m.def("full", static_cast<py::array_t<double>(*)(const std::vector<py::ssize_t>&, double)>(&numpy::full));
@@ -77,9 +79,8 @@ PYBIND11_MODULE(numpycpp, m) {
     // single "astype" — pybind11 cannot resolve overloads that differ only
     // by return type (e.g. astype<double> vs astype<bool> both take
     // py::array_t<double>). Each dtype combo needs a distinct Python name.
-    m.def("astype_int", static_cast<py::array_t<int>(*)(const py::array_t<double>&)>(&numpy::astype_int));
-    m.def("astype_bool", static_cast<py::array_t<bool>(*)(const py::array_t<double>&)>(&numpy::astype_bool));
-    m.def("astype_bool_from_int", static_cast<py::array_t<bool>(*)(const py::array_t<int>&)>(&numpy::astype_bool_from_int));
+    m.def("astype", static_cast<py::array(*)(const py::array&, const std::string&)>(&numpy::astype),
+          py::arg("arr"), py::arg("dtype"));
     m.def("truncate_to_float32", static_cast<py::array_t<double>(*)(const py::array_t<double>&)>(&numpy::truncate_to_float32));
 
     // -- Element-wise math -------------------------------------------------

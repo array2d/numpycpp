@@ -443,16 +443,16 @@ def test_full(shape, fill_val, cpp):
 @pytest.mark.parametrize("value", [True, False])
 def test_full_like_bool(value, cpp):
     a = random_array((3, 4))
-    assert_bit_aligned(cpp.full_like_bool(a, value),
-                       np.full_like(a, value, dtype=bool), f"full_like_bool({value})")
+    assert_bit_aligned(cpp.full_like(a, value),
+                       np.full_like(a, value, dtype=bool), f"full_like({value})")
 
 def test_zeros_like_bool(cpp):
     a = random_array((3, 4))
-    assert_bit_aligned(cpp.zeros_like_bool(a), np.zeros_like(a, dtype=bool), "zeros_like_bool")
+    assert_bit_aligned(cpp.zeros_like(a, "bool"), np.zeros_like(a, dtype=bool), "zeros_like")
 
 def test_ones_like_bool(cpp):
     a = random_array((3, 4))
-    assert_bit_aligned(cpp.ones_like_bool(a), np.ones_like(a, dtype=bool), "ones_like_bool")
+    assert_bit_aligned(cpp.ones_like(a, "bool"), np.ones_like(a, dtype=bool), "ones_like")
 
 
 # ============================================================================
@@ -461,15 +461,15 @@ def test_ones_like_bool(cpp):
 
 def test_astype_int(cpp):
     a = np.array([[1.7, 2.3], [-3.9, 0.5]], dtype=np.float64)
-    assert_bit_aligned(cpp.astype_int(a), a.astype(np.int32), "astype_int")
+    assert_bit_aligned(cpp.astype(a, "int"), a.astype(np.int32), "astype_int")
 
 def test_astype_bool(cpp):
     a = np.array([[0.0, 1.0, -1.0], [3.14, 0.0, 0.0]], dtype=np.float64)
-    assert_bit_aligned(cpp.astype_bool(a), a.astype(bool), "astype_bool")
+    assert_bit_aligned(cpp.astype(a, "bool"), a.astype(bool), "astype_bool")
 
 def test_astype_bool_from_int(cpp):
     a = np.array([[0, 1, -1], [42, 0, 0]], dtype=np.int32)
-    assert_bit_aligned(cpp.astype_bool_from_int(a), a.astype(bool), "astype_bool_from_int")
+    assert_bit_aligned(cpp.astype(a, "bool"), a.astype(bool), "astype_bool_from_int")
 
 def test_truncate_to_float32(cpp):
     a = np.array([1.0 / 3.0, np.pi, np.sqrt(2.0)], dtype=np.float64)
