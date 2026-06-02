@@ -1,3 +1,6 @@
+// INTERNAL HEADER — DO NOT INCLUDE DIRECTLY.
+// Use #include "numpy/core.h" which pulls this in automatically.
+//
 // SVML/npy bridge — bit-exact math on every x86_64 architecture.
 //
 // numpy uses different math implementations depending on CPU features:

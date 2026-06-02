@@ -27,9 +27,18 @@ All APIs are tested against Python numpy under strict bit-level comparison: ever
 
 ### Usage
 
-```cpp
-#include "numpy/core.h"
+**Public headers** — these are the only files you should `#include`:
 
+```cpp
+#include "numpy/core.h"     // numpy.* equivalents
+#include "numpy/linalg.h"   // numpy.linalg.*
+#include "numpy/einsum.h"   // numpy.einsum
+```
+
+> `numpy/svml_bridge.h` and `numpy/npy_math_float.h` are **internal** — they are
+> automatically pulled in by `core.h`. Do not include them directly.
+
+```cpp
 std::vector<double> data = {1.0, 4.0, 9.0};
 std::vector<double> result(data.size());
 
@@ -168,12 +177,12 @@ All 460 tests pass under strict IEEE 754 bit comparison (float64 + float32).
 
 ```
 numpycpp/
-├── numpy/              # native C++ headers (zero dependency)
-│   ├── core.h          # numpy.* equivalents (pairwise_sum, element-wise, reductions, etc.)
-│   ├── linalg.h        # numpy.linalg.* (norm, norm_axis)
-│   ├── einsum.h        # numpy.einsum (SSE SIMD xmm, OpenMP, stride-based fast path)
-│   ├── svml_bridge.h  # runtime dlsym resolver for numpy's SVML vector functions
-│   └── npy_math_float.h # numpy's own float32 polynomial approximations
+├── numpy/              # native C++ headers
+│   ├── core.h          # [PUBLIC] numpy.* equivalents
+│   ├── linalg.h        # [PUBLIC] numpy.linalg.*
+│   ├── einsum.h        # [PUBLIC] numpy.einsum
+│   ├── svml_bridge.h   # [INTERNAL] do not include directly
+│   └── npy_math_float.h # [INTERNAL] do not include directly
 ├── pycpp/              # pybind11 wrappers (optional)
 │   ├── core_py.h
 │   ├── linalg_py.h

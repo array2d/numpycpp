@@ -1,3 +1,6 @@
+// INTERNAL HEADER — DO NOT INCLUDE DIRECTLY.
+// Use #include "numpy/core.h" which pulls this in automatically.
+//
 // Bit-exact float32 math matching numpy 1.23.5 SIMD polynomial approximations.
 // Replicates numpy's simd_exp_FLOAT, simd_log_FLOAT, simd_sincos_f32 algorithms.
 
