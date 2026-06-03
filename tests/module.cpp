@@ -76,6 +76,7 @@ PYBIND11_MODULE(numpycpp, m) {
     // -- Element-wise math -------------------------------------------------
     BIND_F1(sqrt); BIND_F1(abs); BIND_F1(exp); BIND_F1(log);
     BIND_F1(sin); BIND_F1(cos); BIND_F1(tan);
+    BIND_F1(cbrt); BIND_F1(expm1); BIND_F1(log1p);
     BIND_F1(log10); BIND_F1(log2); BIND_F1(arcsin); BIND_F1(arccos); BIND_F1(arctan);
     BIND_F1(round); BIND_F1(floor); BIND_F1(ceil);
     BIND_F1(degrees); BIND_F1(radians); BIND_F1(sign);

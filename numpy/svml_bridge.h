@@ -125,6 +125,9 @@ NUMPY_SVML_F64(atan,  "__svml_atan8",  "npy_atan")
 NUMPY_SVML_F64(log10, "__svml_log108", "npy_log10")
 NUMPY_SVML_F64(log2,  "__svml_log28",  "npy_log2")
 NUMPY_SVML_F64(exp2,  "__svml_exp28",  "npy_exp2")
+NUMPY_SVML_F64(cbrt,  "__svml_cbrt8",  "npy_cbrt")
+NUMPY_SVML_F64(expm1, "__svml_expm18", "npy_expm1")
+NUMPY_SVML_F64(log1p, "__svml_log1p8", "npy_log1p")
 
 NUMPY_SVML_F32(tan,   "__svml_tanf16",  "npy_tanf")
 NUMPY_SVML_F32(asin,  "__svml_asinf16", "npy_asinf")
@@ -133,6 +136,9 @@ NUMPY_SVML_F32(atan,  "__svml_atanf16", "npy_atanf")
 NUMPY_SVML_F32(log10, "__svml_log10f16","npy_log10f")
 NUMPY_SVML_F32(log2,  "__svml_log2f16", "npy_log2f")
 NUMPY_SVML_F32(exp2,  "__svml_exp2f16", "npy_exp2f")
+NUMPY_SVML_F32(cbrt,  "__svml_cbrtf16", "npy_cbrtf")
+NUMPY_SVML_F32(expm1, "__svml_expm1f16","npy_expm1f")
+NUMPY_SVML_F32(log1p, "__svml_log1pf16","npy_log1pf")
 
 // pow / atan2 — SVML 2-arg
 __attribute__((target("avx512f")))
@@ -195,6 +201,9 @@ NUMPY_NPY_F64(atan,  std::atan(x))
 NUMPY_NPY_F64(log10, std::log10(x))
 NUMPY_NPY_F64(log2,  std::log2(x))
 NUMPY_NPY_F64(exp2,  std::exp2(x))
+NUMPY_NPY_F64(cbrt,  std::cbrt(x))
+NUMPY_NPY_F64(expm1, std::expm1(x))
+NUMPY_NPY_F64(log1p, std::log1p(x))
 
 // f32: fallback via numpy's own polynomial approximations
 // f32 exp/log/sin/cos: numpy's own polynomial approximations (npy_math_float.h)
@@ -211,6 +220,9 @@ NUMPY_NPY_F32(atan,  std::atan(x))
 NUMPY_NPY_F32(log10, std::log10(x))
 NUMPY_NPY_F32(log2,  std::log2(x))
 NUMPY_NPY_F32(exp2,  std::exp2(x))
+NUMPY_NPY_F32(cbrt,  std::cbrt(x))
+NUMPY_NPY_F32(expm1, std::expm1(x))
+NUMPY_NPY_F32(log1p, std::log1p(x))
 
 // hypot — numpy matches libm bit-exact for both f32 and f64
 inline double hypot_f64(double x, double y) { return std::hypot(x, y); }
@@ -271,6 +283,9 @@ DISPATCH_F64(atan)
 DISPATCH_F64(log10)
 DISPATCH_F64(log2)
 DISPATCH_F64(exp2)
+DISPATCH_F64(cbrt)
+DISPATCH_F64(expm1)
+DISPATCH_F64(log1p)
 DISPATCH_F32(tan)
 DISPATCH_F32(asin)
 DISPATCH_F32(acos)
@@ -278,6 +293,9 @@ DISPATCH_F32(atan)
 DISPATCH_F32(log10)
 DISPATCH_F32(log2)
 DISPATCH_F32(exp2)
+DISPATCH_F32(cbrt)
+DISPATCH_F32(expm1)
+DISPATCH_F32(log1p)
 
 // f32 exp/log/sin/cos: numpy uses its own polynomial approximations
 // (npy_math_float.h), NOT SVML. These are bit-exact on all architectures.
@@ -328,6 +346,9 @@ template<> struct svml_impl<T> {                                     \
     static T log10(T x){ return log10_##suff(x); }                   \
     static T log2(T x) { return log2_##suff(x); }                    \
     static T exp2(T x) { return exp2_##suff(x); }                    \
+    static T cbrt(T x) { return cbrt_##suff(x); }                    \
+    static T expm1(T x){ return expm1_##suff(x); }                   \
+    static T log1p(T x){ return log1p_##suff(x); }                   \
     static T sqrt(T x) { return sqrt_##suff(x); }                    \
     static T pow(T x, T e)    { return pow_##suff(x, e); }           \
     static T atan2(T y, T x)  { return atan2_##suff(y, x); }         \
@@ -353,6 +374,9 @@ NUMPY_SVML_D1(atan)
 NUMPY_SVML_D1(log10)
 NUMPY_SVML_D1(log2)
 NUMPY_SVML_D1(exp2)
+NUMPY_SVML_D1(cbrt)
+NUMPY_SVML_D1(expm1)
+NUMPY_SVML_D1(log1p)
 NUMPY_SVML_D1(sqrt)
 #undef NUMPY_SVML_D1
 

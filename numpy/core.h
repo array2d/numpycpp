@@ -113,6 +113,24 @@ inline void tan(const T* src, T* dst, size_t n) {
     NUMPY_UNROLL4(i, dst[i] = detail::tan(src[i]));
 }
 
+/// numpy.cbrt(x, /, out=None, *, where=True, ...)
+template<typename T>
+inline void cbrt(const T* src, T* dst, size_t n) {
+    NUMPY_UNROLL4(i, dst[i] = detail::cbrt(src[i]));
+}
+
+/// numpy.expm1(x, /, out=None, *, where=True, ...)
+template<typename T>
+inline void expm1(const T* src, T* dst, size_t n) {
+    NUMPY_UNROLL4(i, dst[i] = detail::expm1(src[i]));
+}
+
+/// numpy.log1p(x, /, out=None, *, where=True, ...)
+template<typename T>
+inline void log1p(const T* src, T* dst, size_t n) {
+    NUMPY_UNROLL4(i, dst[i] = detail::log1p(src[i]));
+}
+
 /// numpy.power(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
 inline void power(const T* src, T* dst, size_t n, T exponent) {

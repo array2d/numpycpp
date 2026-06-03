@@ -10,7 +10,8 @@ CXXFLAGS ?= -std=c++17 -O2 -fPIC -fopenmp -ffp-contract=off \
 	-fno-builtin-cos -fno-builtin-tan -fno-builtin-pow \
 	-fno-builtin-sqrt -fno-builtin-atan2 -fno-builtin-log2 \
 	-fno-builtin-log10 -fno-builtin-asin -fno-builtin-acos \
-	-fno-builtin-atan -fno-builtin-exp2
+	-fno-builtin-atan -fno-builtin-exp2 \
+	-fno-builtin-cbrt -fno-builtin-expm1 -fno-builtin-log1p
 INCLUDES  = -I.. -I../pycpp $(shell python3 -m pybind11 --includes) $(shell pkg-config --cflags eigen3 2>/dev/null || echo)
 LDFLAGS   = -shared -ldl
 
