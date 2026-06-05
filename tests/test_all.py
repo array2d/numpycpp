@@ -958,11 +958,13 @@ def test_to_vector_bool(cpp):
 
 def test_norm_1d(cpp, dtype):
     a = random_array((100,), dtype=dtype)
-    assert_bit_aligned(dtype(cpp.linalg.norm(a)), np.sqrt(np.sum(a * a)), "linalg.norm 1d")
+    # np.linalg.norm internally computes sqrt(a.dot(a)) via BLAS
+    assert_bit_aligned(dtype(cpp.linalg.norm(a)), dtype(np.linalg.norm(a)), "linalg.norm 1d")
 
 def test_norm_2d(cpp, dtype):
     a = random_array((5, 4), dtype=dtype)
-    assert_bit_aligned(dtype(cpp.linalg.norm(a)), np.sqrt(np.sum(a * a)), "linalg.norm 2d")
+    # Frobenius norm: same BLAS path as 1d
+    assert_bit_aligned(dtype(cpp.linalg.norm(a)), dtype(np.linalg.norm(a)), "linalg.norm 2d")
 
 def test_norm_zero(cpp, dtype):
     a = np.zeros((100,), dtype=dtype)
@@ -981,12 +983,13 @@ def test_norm_1d_fallback(cpp, dtype):
 def test_dot(cpp, dtype):
     a = random_array((5,), dtype=dtype)
     b = random_array((5,), seed=99, dtype=dtype)
-    assert_bit_aligned(cpp.dot(a, b), np.sum(a * b), "dot")
+    # np.dot routes through BLAS sdot/ddot
+    assert_bit_aligned(cpp.dot(a, b), np.dot(a, b), "dot")
 
 def test_dot_orthogonal(cpp, dtype):
     a = np.array([1.0, 0.0], dtype=dtype)
     b = np.array([0.0, 1.0], dtype=dtype)
-    assert_bit_aligned(cpp.dot(a, b), np.sum(a * b), "dot orthogonal")
+    assert_bit_aligned(cpp.dot(a, b), np.dot(a, b), "dot orthogonal")
 
 
 # ============================================================================

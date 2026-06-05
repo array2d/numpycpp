@@ -9,13 +9,12 @@
 namespace numpy {
 namespace linalg {
 
-/// numpy.linalg.norm(x, ord=None, axis=None, keepdims=False) — frobenius/vector
-//  Uses norm_sq (pairwise sum) → matches np.sqrt(np.sum(x**2)).
-//  For float32, norm_sq() and sqrt() stay in float32.
+/// numpy.linalg.norm(x, ord=None, axis=None, keepdims=False) — vector / Frobenius
+//  np.linalg.norm(a) internally computes sqrt(a.dot(a)) via BLAS sdot/ddot.
+//  We call the same OpenBLAS routine (auto-discovered) for bit-exact match.
 template<typename T>
 inline T norm(const T* data, size_t n) {
-    T sqnorm = numpy::norm_sq(data, n);  // pairwise sum of squares
-    return std::sqrt(sqnorm);
+    return numpy::detail::blas_ops<T>::norm(data, n);
 }
 
 /// numpy.linalg.norm(x, ord=None, axis=N, keepdims=False) — N-D

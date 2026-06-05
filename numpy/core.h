@@ -23,6 +23,7 @@
 #include <stdexcept>
 
 #include "svml_bridge.h"
+#include "blas_bridge.h"
 
 namespace numpy {
 
@@ -974,15 +975,12 @@ inline T norm_sq(const T* data, size_t n) {
     return result;
 }
 
-/// numpy.dot(a, b, out=None) — pairwise sum, matches np.sum(a*b)
+/// numpy.dot(a, b, out=None)
+/// Routes through OpenBLAS sdot_64_/ddot_64_ (auto-discovered via /proc/self/maps)
+/// for bit-exact match with np.dot(a, b) which calls BLAS internally.
 template<typename T>
 inline T dot(const T* a, const T* b, size_t n) {
-    T buf[NUMPY_SMALL_STACK];
-    T* prods = (n <= NUMPY_SMALL_STACK) ? buf : new T[n];
-    for (size_t i = 0; i < n; ++i) prods[i] = a[i] * b[i];
-    T result = pairwise_sum(prods, n);
-    if (n > NUMPY_SMALL_STACK) delete[] prods;
-    return result;
+    return detail::blas_ops<T>::dot(a, b, n);
 }
 
 /// numpy.linalg.norm(x, ord=None, axis=N, keepdims=False) — N-D
