@@ -6,7 +6,7 @@
 // ║  All symbols live in numpy::detail — an implementation namespace that   ║
 // ║  external code must never reference.                                     ║
 // ║                                                                          ║
-// ║  ✗  #include "numpy/svml_bridge.h"      ← compile error                ║
+// ║  ✗  #include "numpy/detail/svml_bridge.h"      ← compile error                ║
 // ║  ✗  numpy::detail::exp_svml_f64(x)      ← undefined behaviour          ║
 // ║  ✓  #include "numpy/core.h"             ← only correct entry point      ║
 // ║  ✓  numpy::exp(src, dst, n)             ← public API                    ║

@@ -5,7 +5,7 @@
 // ║  All symbols live in numpy::detail — an implementation namespace that   ║
 // ║  external code must never reference.                                     ║
 // ║                                                                          ║
-// ║  ✗  #include "numpy/blas_bridge.h"      ← compile error                ║
+// ║  ✗  #include "numpy/detail/blas_bridge.h"      ← compile error                ║
 // ║  ✗  numpy::detail::blas_sdot(...)       ← undefined behaviour          ║
 // ║  ✓  #include "numpy/core.h"             ← only correct entry point      ║
 // ║  ✓  numpy::dot(a, b, n)                 ← public API                    ║

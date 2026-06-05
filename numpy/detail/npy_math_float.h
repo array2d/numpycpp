@@ -5,7 +5,7 @@
 // ║  are tied to numpy's internal SIMD constants.  The API is UNSTABLE and  ║
 // ║  subject to change without notice.                                       ║
 // ║                                                                          ║
-// ║  ✗  #include "numpy/npy_math_float.h"   ← compile error                ║
+// ║  ✗  #include "numpy/detail/npy_math_float.h"   ← compile error                ║
 // ║  ✓  #include "numpy/core.h"             ← only correct entry point      ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 

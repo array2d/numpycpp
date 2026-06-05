@@ -5,7 +5,7 @@
 // ║  generic loops in core.h.  It is x86_64 + AVX-512F specific and must   ║
 // ║  be included INSIDE namespace numpy at the end of core.h — nowhere else.║
 // ║                                                                          ║
-// ║  ✗  #include "numpy/avx512_loops.h"     ← compile error                ║
+// ║  ✗  #include "numpy/detail/avx512_loops.h"     ← compile error                ║
 // ║  ✓  #include "numpy/core.h"             ← only correct entry point      ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //

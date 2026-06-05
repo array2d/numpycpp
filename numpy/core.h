@@ -9,10 +9,10 @@
 //
 //  The four internal headers pulled in below are LOCKED behind
 //  NUMPYCPP_INTERNAL_INCLUDE and will cause a #error if included directly:
-//    • svml_bridge.h   — SVML/npy scalar bridge  (x86_64 + Linux)
-//    • blas_bridge.h   — OpenBLAS ILP64 bridge   (x86_64 + Linux)
-//    • npy_math_float.h— float32 poly kernels    (numpy internal constants)
-//    • avx512_loops.h  — AVX-512 specializations (requires AVX-512F CPU)
+//    • detail/svml_bridge.h    — SVML/npy scalar bridge  (x86_64 + Linux)
+//    • detail/blas_bridge.h    — OpenBLAS ILP64 bridge   (x86_64 + Linux)
+//    • detail/npy_math_float.h — float32 poly kernels    (numpy internal constants)
+//    • detail/avx512_loops.h   — AVX-512 specializations (requires AVX-512F CPU)
 //
 //  All functions operate on raw pointers + sizes.
 //  Each function is annotated with its Python numpy equivalent,
@@ -41,9 +41,9 @@
 // The macro below is the compile-time lock; it is #undef-ed at the end of this
 // file so it cannot "leak" into translation units that include core.h.
 #define NUMPYCPP_INTERNAL_INCLUDE
-#include "svml_bridge.h"   // numpy::detail::{exp,log,sin,...}_f32/f64 — SVML/npy
-#include "blas_bridge.h"   // numpy::detail::blas_ops<T> — OpenBLAS ILP64
-// avx512_loops.h included at namespace-close (line ~1004), also guarded.
+#include "detail/svml_bridge.h"   // numpy::detail::{exp,log,sin,...}_f32/f64
+#include "detail/blas_bridge.h"   // numpy::detail::blas_ops<T> — OpenBLAS ILP64
+// detail/avx512_loops.h included at namespace-close below, also guarded.
 
 namespace numpy {
 
@@ -1021,7 +1021,7 @@ inline void norm_axis(const T* src, T* dst, const ptrdiff_t* shape, int ndim, in
 // AVX-512 wide-loop template specializations (0 ULP, ~8-16x faster than scalar)
 // Must be included inside namespace numpy after all primary templates.
 // ============================================================================
-#include "avx512_loops.h"
+#include "detail/avx512_loops.h"
 
 // Release the internal-include lock so it does not pollute the includer's TU.
 #undef NUMPYCPP_INTERNAL_INCLUDE
