@@ -989,4 +989,10 @@ inline void norm_axis(const T* src, T* dst, const ptrdiff_t* shape, int ndim, in
         });
 }
 
+// ============================================================================
+// AVX-512 wide-loop template specializations (0 ULP, ~8-16x faster than scalar)
+// Must be included inside namespace numpy after all primary templates.
+// ============================================================================
+#include "avx512_loops.h"
+
 } // namespace numpy
