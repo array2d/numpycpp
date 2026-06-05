@@ -105,10 +105,10 @@ inline float npy_logf(float x) {
 
     // NaN
     if (exp_field == 0xff && (bits & 0x7fffff) != 0) return x;
+    // x == 0 or -0 -> -inf  (must check before sign bit to handle -0.0 correctly)
+    if ((bits & 0x7fffffffu) == 0) return uint32_to_float(0xff800000u);
     // x < 0 -> -NaN
     if (bits & 0x80000000u) return uint32_to_float(0xffc00000u);
-    // x == 0 -> -inf
-    if ((bits & 0x7fffffffu) == 0) return uint32_to_float(0xff800000u);
     // x == +inf -> +inf
     if (bits == 0x7f800000u) return x;
 

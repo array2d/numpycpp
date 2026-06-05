@@ -208,7 +208,9 @@ inline void radians(const T* src, T* dst, size_t n) {
 /// numpy.sign(x, /, out=None, *, where=True, ...)
 template<typename T>
 inline void sign(const T* src, T* dst, size_t n) {
-    NUMPY_UNROLL4(i, dst[i] = T((src[i] > T(0)) - (src[i] < T(0))));
+    // NaN input → NaN output (numpy behavior); ordered comparisons return false for NaN
+    NUMPY_UNROLL4(i, dst[i] = std::isnan(src[i]) ? src[i]
+                                                  : T((src[i] > T(0)) - (src[i] < T(0))));
 }
 
 // ============================================================================
@@ -848,17 +850,25 @@ inline void unwrap(const T* src, T* dst, size_t n, T discont = T(M_PI)) {
     for (size_t i = 1; i < n; ++i) {
         T dd = src[i] - src[i - 1];
         T ph_correct = T(0);
-        if (std::abs(dd) >= discont) {
-            // numpy: ddmod = (dd + period/2) % period - period/2
-            // Python-style mod using floor division (numpy's mod):
+        if (std::isnan(dd)) {
+            // NaN difference: propagate NaN into cumulative correction so all
+            // subsequent outputs are NaN — matching numpy's cumsum(corrections) behavior
+            cum_correct = dd;
+        } else if (std::abs(dd) >= discont) {
+            // numpy: ddmod = mod(dd - interval_low, period) + interval_low
+            //   where interval_low = -p2, so: ddmod = mod(dd + p2, period) - p2
+            // numpy's mod uses fmod + sign-correction, NOT floor(a/b)*b:
             T val = dd + p2;
-            T val_mod = val - std::floor(val / period) * period;
+            T val_mod_signed = std::fmod(val, period);
+            T val_mod = (val_mod_signed < T(0)) ? val_mod_signed + period : val_mod_signed;
             T ddmod = val_mod - p2;
             // boundary_ambiguous: when dd > 0 and ddmod == -period/2, use +period/2
             if (dd > T(0) && ddmod == -p2) ddmod = p2;
             ph_correct = ddmod - dd;
+            cum_correct += ph_correct;
+        } else {
+            cum_correct += ph_correct;
         }
-        cum_correct += ph_correct;
         dst[i] = src[i] + cum_correct;
     }
 }

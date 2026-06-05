@@ -276,14 +276,17 @@ inline void log<float>(const float* __restrict__ s,
         __m512 result = _mm512_fmadd_ps(exponent, Vln2, _mm512_div_ps(num, den));
 
         // Special cases (checked after main polynomial — masks override)
+        // Note: integer bit ops above strip NaN bits → must restore NaN explicitly.
         __mmask16 is_zero = _mm512_cmpeq_epi32_mask(
                                 _mm512_and_si512(bits, _mm512_set1_epi32(0x7fffffff)),
                                 _mm512_setzero_si512());
         __mmask16 is_neg    = _mm512_cmp_ps_mask(x, _mm512_setzero_ps(), _CMP_LT_OQ);
         __mmask16 is_posinf = _mm512_cmp_ps_mask(x, Vposinf, _CMP_EQ_OQ);
+        __mmask16 is_nan    = _mm512_cmp_ps_mask(x, x, _CMP_UNORD_Q); // x!=x → NaN
         result = _mm512_mask_blend_ps(is_zero,   result, Vneginf);
         result = _mm512_mask_blend_ps(is_neg,    result, Vneqnan);
         result = _mm512_mask_blend_ps(is_posinf, result, Vposinf);
+        result = _mm512_mask_blend_ps(is_nan,    result, x);  // NaN passthrough
         _mm512_storeu_ps(d + i, result);
     }
     for (; i < n; ++i) d[i] = detail::log_npy_f32(s[i]);
@@ -347,6 +350,11 @@ inline void sin<float>(const float* __restrict__ s,
         __m512 result = _mm512_mask_blend_ps(sel_cp, sp, cp);
         __mmask16 neg  = _mm512_test_epi32_mask(iq, _mm512_set1_epi32(2));
         result = _mm512_mask_sub_ps(result, neg, _mm512_setzero_ps(), result);
+
+        // sin(±0) = ±0: signed-zero must be preserved (numpy matches IEEE 754)
+        // fma(sp, r, r) with r=±0 gives +0 due to IEEE 754 RN rules → blend back x
+        __mmask16 is_zero = _mm512_cmp_ps_mask(x, _mm512_setzero_ps(), _CMP_EQ_OQ);
+        result = _mm512_mask_blend_ps(is_zero, result, x);
 
         // Out-of-range scalar fallback (rarely triggered; branch predicted-not-taken)
         __mmask16 inr = _mm512_cmp_ps_mask(_mm512_abs_ps(x), Vmax, _CMP_LE_OQ);
