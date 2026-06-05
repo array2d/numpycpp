@@ -274,7 +274,13 @@ inline float atan2_npy_f32(float y, float x) {
 
 DISPATCH_F64(exp)
 DISPATCH_F64(log)
-DISPATCH_F64(sin)
+// sin_f64: custom — SVML scalar broadcast path loses signed zero (sin(-0)→+0).
+// IEEE 754 requires sin(±0) = ±0; preserve sign of zero explicitly.
+inline double sin_f64(double x) {
+    double r = cpu_has_avx512f() ? sin_svml_f64(x) : sin_npy_f64(x);
+    if (__builtin_expect(x == 0.0 && r == 0.0, 0)) return x;  // ±0 → ±0
+    return r;
+}
 DISPATCH_F64(cos)
 DISPATCH_F64(tan)
 DISPATCH_F64(asin)
@@ -301,7 +307,13 @@ DISPATCH_F32(log1p)
 // (npy_math_float.h), NOT SVML. These are bit-exact on all architectures.
 inline float exp_f32(float x)  { return exp_npy_f32(x); }
 inline float log_f32(float x)  { return log_npy_f32(x); }
-inline float sin_f32(float x)  { return sin_npy_f32(x); }
+// sin_f32: npy_sinf polynomial computes fma(sp,r,r) with r=±0 → +0 (IEEE RN rule),
+// losing the sign.  Restore: IEEE 754 mandates sin(±0) = ±0.
+inline float sin_f32(float x) {
+    float r = sin_npy_f32(x);
+    if (__builtin_expect(x == 0.0f && r == 0.0f, 0)) return x;  // sin(±0)=±0
+    return r;
+}
 inline float cos_f32(float x)  { return cos_npy_f32(x); }
 
 // pow / atan2 dispatchers

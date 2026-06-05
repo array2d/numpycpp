@@ -200,6 +200,11 @@ inline void exp<float>(const float* __restrict__ s,
                                     poly, Vinf);
         poly = _mm512_mask_blend_ps(_mm512_cmp_ps_mask(x, VXmin, _CMP_LE_OQ),
                                     poly, _mm512_setzero_ps());
+        // NaN passthrough: ordered comparisons above return false for NaN → poly holds
+        // polynomial-derived NaN; blend back original x to guarantee bit-exact match
+        // with numpy's scalar npy_expf which returns x unchanged for NaN input.
+        __mmask16 is_nan_e = _mm512_cmp_ps_mask(x, x, _CMP_UNORD_Q);
+        poly = _mm512_mask_blend_ps(is_nan_e, poly, x);
         _mm512_storeu_ps(d + i, poly);
     }
     for (; i < n; ++i) d[i] = detail::exp_npy_f32(s[i]);
@@ -366,9 +371,14 @@ inline void sin<float>(const float* __restrict__ s,
                 if (!((inr >> j) & 1)) rt[j] = std::sin(xt[j]);
             result = _mm512_loadu_ps(rt);
         }
+        // NaN passthrough: blend back original x after fallback so NaN output = NaN
+        // input (bit-exact with numpy's scalar npy_sinf which returns x for NaN).
+        __mmask16 is_nan_s = _mm512_cmp_ps_mask(x, x, _CMP_UNORD_Q);
+        result = _mm512_mask_blend_ps(is_nan_s, result, x);
         _mm512_storeu_ps(d + i, result);
     }
-    for (; i < n; ++i) d[i] = detail::sin_npy_f32(s[i]);
+    // sin_f32 adds signed-zero fix: sin(±0)=±0 (npy_sinf polynomial gives +0 for -0).
+    for (; i < n; ++i) d[i] = detail::sin_f32(s[i]);
 }
 
 // ----------------------------------------------------------------------------
@@ -434,6 +444,9 @@ inline void cos<float>(const float* __restrict__ s,
                 if (!((inr >> j) & 1)) rt[j] = std::cos(xt[j]);
             result = _mm512_loadu_ps(rt);
         }
+        // NaN passthrough: blend back original x (bit-exact with numpy scalar npy_cosf).
+        __mmask16 is_nan_c = _mm512_cmp_ps_mask(x, x, _CMP_UNORD_Q);
+        result = _mm512_mask_blend_ps(is_nan_c, result, x);
         _mm512_storeu_ps(d + i, result);
     }
     for (; i < n; ++i) d[i] = detail::cos_npy_f32(s[i]);

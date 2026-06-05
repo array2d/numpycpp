@@ -36,12 +36,43 @@ def check_bit_aligned(cpp_result, py_result, label=""):
         info["error"] = f"shape mismatch: C++ {cpp.shape} vs Python {py.shape}"
         return info
 
-    if np.array_equal(cpp, py):
-        info["pass"] = True
-        return info
+    # --- bit-level equality ---
+    # For floating-point arrays with the SAME dtype use uint bit-view comparison so
+    # NaN==NaN (same bits) passes.  np.array_equal returns False for NaN (IEEE 754).
+    #
+    # When dtypes differ (some C++ functions return float64 for float32 input) we
+    # fall back to numpy's numeric comparison (float32 is upcast to float64).
+    _UINT_VIEW = {4: np.uint32, 8: np.uint64}
+    if cpp.dtype.kind == 'f' and cpp.dtype == py.dtype:
+        uint_t = _UINT_VIEW.get(cpp.itemsize)
+        if uint_t is not None:
+            cpp_u = np.ascontiguousarray(cpp).ravel().view(uint_t)
+            py_u  = np.ascontiguousarray(py ).ravel().view(uint_t)
+            if np.array_equal(cpp_u, py_u):
+                info["pass"] = True
+                return info
+            diff_mask = (cpp_u != py_u).reshape(cpp.shape)
+        else:
+            if np.array_equal(cpp, py):
+                info["pass"] = True
+                return info
+            diff_mask = cpp != py
+    else:
+        if np.array_equal(cpp, py):
+            info["pass"] = True
+            return info
+        # cpp != py may return a scalar bool (Python/numpy) for incompatible shapes
+        # (old numpy behaviour).  Normalise to an ndarray with cpp's shape.
+        diff_raw = np.asarray(cpp != py)
+        if diff_raw.shape != cpp.shape:
+            try:
+                diff_mask = diff_raw.reshape(cpp.shape)
+            except ValueError:
+                diff_mask = np.ones(cpp.shape, dtype=bool)
+        else:
+            diff_mask = diff_raw
 
     # --- bit-level mismatch --- build hex diagnostic ---
-    diff_mask = cpp != py
     info["n_diff"] = int(np.sum(diff_mask))
     diff_indices = np.flatnonzero(diff_mask.ravel())
     n_show = min(5, len(diff_indices))
@@ -58,8 +89,8 @@ def check_bit_aligned(cpp_result, py_result, label=""):
             cpp_vdt, py_vdt = _EL_VIEW.get(cpp_esz), _EL_VIEW.get(py_esz)
             cpp_fmt = _EL_FMT.get(cpp_esz, "016x")
             py_fmt  = _EL_FMT.get(py_esz, "016x")
-            cpp_hex = cpp.view(cpp_vdt).flat[idx] if cpp_vdt else 0
-            py_hex  = py.view(py_vdt).flat[idx]  if py_vdt  else 0
+            cpp_hex = np.ascontiguousarray(cpp).view(cpp_vdt).flat[idx] if cpp_vdt else 0
+            py_hex  = np.ascontiguousarray(py ).view(py_vdt ).flat[idx] if py_vdt  else 0
             if not cpp_vdt: cpp_fmt = ""
             if not py_vdt:  py_fmt  = ""
             cpp_str = f"C++={cpp_val:.16e} (0x{cpp_hex:{cpp_fmt}})" if cpp_fmt else f"C++={cpp_val:.16e}"
@@ -1154,6 +1185,311 @@ class TestEinsumLargeGateMachine:
         b = random_array((n, dims), seed=2, dtype=dtype)
         assert_bit_aligned(cpp.einsum("ij,ij->i", a, b),
                            np.einsum("ij,ij->i", a, b), f"gate_machine [{n},{dims}]")
+
+
+# ============================================================================
+# 16. Special values — NaN / ±0 / ±Inf passthrough
+# ============================================================================
+#
+# All float functions must be bit-exact with numpy for IEEE 754 special inputs:
+#   • NaN input  → NaN output with identical bit pattern
+#   • ±0 input   → correct signed result (sin(-0)=-0, cos(0)=1, etc.)
+#   • ±Inf input → correct result (+inf, -inf, or NaN as numpy defines)
+#   • Domain errors (log(-1), sqrt(-1), arcsin(2)) → NaN bit-exact with numpy
+#
+# AVX-512 boundary sizes (1, 16, 17) stress the scalar-tail vs full-vector paths.
+# ============================================================================
+
+# Functions tested for NaN passthrough (all unary float functions)
+_UNARY_NAN_FNS = [
+    ("exp",     np.exp),
+    ("log",     np.log),
+    ("sin",     np.sin),
+    ("cos",     np.cos),
+    ("tan",     np.tan),
+    ("sqrt",    np.sqrt),
+    ("cbrt",    np.cbrt),
+    ("expm1",   np.expm1),
+    ("log1p",   np.log1p),
+    ("log10",   np.log10),
+    ("log2",    np.log2),
+    ("arcsin",  np.arcsin),
+    ("arccos",  np.arccos),
+    ("arctan",  np.arctan),
+    ("abs",     np.abs),
+    ("sign",    np.sign),
+    ("floor",   np.floor),
+    ("ceil",    np.ceil),
+    ("round",   np.round),
+    ("degrees", np.degrees),
+    ("radians", np.radians),
+]
+_NAN_FN_IDS = [fn for fn, _ in _UNARY_NAN_FNS]
+
+# AVX-512 boundary sizes: 1 = scalar-tail only; 16 = full f32 vector; 17 = vector+tail
+_NAN_SIZES_F32 = [1, 16, 17]
+# F64 vector width = 8: 1 = scalar tail; 8 = full f64 vector; 9 = vector+tail
+_NAN_SIZES_F64 = [1, 8, 9]
+
+
+@pytest.mark.parametrize(
+    "fn_name,np_fn,n",
+    [(fn, npf, sz) for fn, npf in _UNARY_NAN_FNS for sz in _NAN_SIZES_F32],
+    ids=[f"{fn}_n{sz}" for fn, _ in _UNARY_NAN_FNS for sz in _NAN_SIZES_F32])
+def test_nan_passthrough_f32(fn_name, np_fn, n, cpp):
+    """NaN input → NaN output, bit-exact with numpy, float32.
+
+    Covers scalar-tail (n=1), full AVX-512 vector (n=16), and vector+tail (n=17).
+    """
+    a = np.full(n, np.nan, dtype=np.float32)
+    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
+                       f"{fn_name}(nan) f32 n={n}")
+
+
+@pytest.mark.parametrize(
+    "fn_name,np_fn,n",
+    [(fn, npf, sz) for fn, npf in _UNARY_NAN_FNS for sz in _NAN_SIZES_F64],
+    ids=[f"{fn}_n{sz}" for fn, _ in _UNARY_NAN_FNS for sz in _NAN_SIZES_F64])
+def test_nan_passthrough_f64(fn_name, np_fn, n, cpp):
+    """NaN input → NaN output, bit-exact with numpy, float64."""
+    a = np.full(n, np.nan, dtype=np.float64)
+    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
+                       f"{fn_name}(nan) f64 n={n}")
+
+
+@pytest.mark.parametrize("fn_name,np_fn", _UNARY_NAN_FNS, ids=_NAN_FN_IDS)
+def test_nan_mixed_f32(fn_name, np_fn, cpp):
+    """Mixed NaN and finite values (17 elements): NaN must not corrupt neighbours.
+
+    17 elements forces AVX-512 16-wide + 1-element scalar tail path.
+    Finite values chosen to lie in the safe domain of all tested functions.
+    """
+    a = np.array([1.0, np.nan, 0.5, np.nan, 0.3, np.nan, 0.7, np.nan,
+                  0.1, np.nan, 0.9, np.nan, 0.2, np.nan, 0.8, np.nan,
+                  0.4], dtype=np.float32)
+    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
+                       f"{fn_name}(mixed nan) f32")
+
+
+@pytest.mark.parametrize("fn_name,np_fn", _UNARY_NAN_FNS, ids=_NAN_FN_IDS)
+def test_nan_mixed_f64(fn_name, np_fn, cpp):
+    """Mixed NaN and finite values (9 elements): AVX-512 8-wide + 1-element tail."""
+    a = np.array([1.0, np.nan, 0.5, np.nan, 0.3,
+                  np.nan, 0.7, np.nan, 0.4], dtype=np.float64)
+    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
+                       f"{fn_name}(mixed nan) f64")
+
+
+# --- Signed zero ---
+
+def test_sin_signed_zero(cpp):
+    """sin(−0.0) = −0.0, sin(+0.0) = +0.0 — signed zeros must propagate."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([-0.0, 0.0], dtype=dt)
+        assert_bit_aligned(cpp.sin(a), np.sin(a), f"sin(±0) {dt.__name__}")
+
+
+def test_cos_signed_zero(cpp):
+    """cos(±0.0) = 1.0 — both signs of zero give the same positive result."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([0.0, -0.0], dtype=dt)
+        assert_bit_aligned(cpp.cos(a), np.cos(a), f"cos(±0) {dt.__name__}")
+
+
+def test_log_neg_zero(cpp):
+    """log(−0.0) = −∞ (IEEE 754: log of ±0 is −∞, not NaN).
+
+    Classic bug: sign-bit check firing before zero check returns NaN instead.
+    """
+    for dt in [np.float32, np.float64]:
+        a = np.array([-0.0], dtype=dt)
+        result = np.asarray(cpp.log(a))
+        assert np.isinf(result[0]) and result[0] < 0, \
+               f"log(-0) should be -inf, got {result[0]} ({dt.__name__})"
+        assert_bit_aligned(result, np.log(a), f"log(-0) {dt.__name__}")
+
+
+def test_exp_signed_zero(cpp):
+    """exp(±0.0) = 1.0 for both zero signs."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([0.0, -0.0], dtype=dt)
+        assert_bit_aligned(cpp.exp(a), np.exp(a), f"exp(±0) {dt.__name__}")
+
+
+# --- Infinity inputs ---
+
+def test_exp_inf(cpp):
+    """exp(+∞) = +∞, exp(−∞) = 0.0 — both must be bit-exact."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.inf, -np.inf], dtype=dt)
+        assert_bit_aligned(cpp.exp(a), np.exp(a), f"exp(±inf) {dt.__name__}")
+
+
+def test_log_pos_inf(cpp):
+    """log(+∞) = +∞."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.inf], dtype=dt)
+        assert_bit_aligned(cpp.log(a), np.log(a), f"log(+inf) {dt.__name__}")
+
+
+def test_sqrt_pos_inf(cpp):
+    """sqrt(+∞) = +∞."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.inf], dtype=dt)
+        assert_bit_aligned(cpp.sqrt(a), np.sqrt(a), f"sqrt(+inf) {dt.__name__}")
+
+
+def test_sin_inf(cpp):
+    """sin(±∞) = NaN (invalid-operation domain error)."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.inf, -np.inf], dtype=dt)
+        assert_bit_aligned(cpp.sin(a), np.sin(a), f"sin(±inf) {dt.__name__}")
+
+
+def test_cos_inf(cpp):
+    """cos(±∞) = NaN (invalid-operation domain error)."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.inf, -np.inf], dtype=dt)
+        assert_bit_aligned(cpp.cos(a), np.cos(a), f"cos(±inf) {dt.__name__}")
+
+
+# --- Domain errors → NaN ---
+
+def test_domain_sqrt_neg(cpp):
+    """sqrt(negative) = NaN — bit-exact with numpy."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([-1.0, -4.0, -0.5], dtype=dt)
+        assert_bit_aligned(cpp.sqrt(a), np.sqrt(a), f"sqrt(neg) {dt.__name__}")
+
+
+def test_domain_log_neg(cpp):
+    """log(negative) = NaN — bit-exact with numpy.
+
+    Also exercises the AVX-512 log path for 16 negative values.
+    """
+    for dt in [np.float32, np.float64]:
+        a = np.array([-1.0, -2.5, -0.5], dtype=dt)
+        assert_bit_aligned(cpp.log(a), np.log(a), f"log(neg) {dt.__name__}")
+    # 16 negative floats — forces AVX-512 is_neg mask path
+    a16 = np.full(16, -1.0, dtype=np.float32)
+    assert_bit_aligned(cpp.log(a16), np.log(a16), "log(neg) f32 n=16")
+
+
+def test_domain_arcsin_oob(cpp):
+    """arcsin/arccos(|x|>1) = NaN — bit-exact with numpy."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([2.0, -2.0, 1.5], dtype=dt)
+        assert_bit_aligned(cpp.arcsin(a), np.arcsin(a), f"arcsin(oob) {dt.__name__}")
+        assert_bit_aligned(cpp.arccos(a), np.arccos(a), f"arccos(oob) {dt.__name__}")
+
+
+# --- sign special values ---
+
+def test_sign_nan_special(cpp):
+    """sign(NaN) = NaN — must not silently return 0."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.nan, np.nan], dtype=dt)
+        assert_bit_aligned(cpp.sign(a), np.sign(a), f"sign(nan) {dt.__name__}")
+
+
+def test_sign_inf_special(cpp):
+    """sign(+∞) = +1.0, sign(−∞) = −1.0."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.inf, -np.inf], dtype=dt)
+        assert_bit_aligned(cpp.sign(a), np.sign(a), f"sign(±inf) {dt.__name__}")
+
+
+def test_sign_zero_signs(cpp):
+    """sign(+0) = sign(−0) = 0.0 — both signed zeros map to positive zero."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([0.0, -0.0], dtype=dt)
+        assert_bit_aligned(cpp.sign(a), np.sign(a), f"sign(±0) {dt.__name__}")
+
+
+# --- unwrap NaN propagation ---
+
+def test_unwrap_nan_propagation(cpp):
+    """NaN element in unwrap must propagate through subsequent output values."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([0.0, 1.0, np.nan, 2.0, 3.0], dtype=dt)
+        assert_bit_aligned(cpp.unwrap(a), np.unwrap(a),
+                           f"unwrap(nan mid) {dt.__name__}")
+
+
+def test_unwrap_nan_leading(cpp):
+    """NaN as first element of unwrap input."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.nan, 1.0, 2.0, 3.0], dtype=dt)
+        assert_bit_aligned(cpp.unwrap(a), np.unwrap(a),
+                           f"unwrap(nan first) {dt.__name__}")
+
+
+def test_unwrap_nan_all_nan(cpp):
+    """All-NaN unwrap input."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.nan, np.nan, np.nan], dtype=dt)
+        assert_bit_aligned(cpp.unwrap(a), np.unwrap(a),
+                           f"unwrap(all nan) {dt.__name__}")
+
+
+# --- linalg special values ---
+
+def test_linalg_norm_nan(cpp):
+    """linalg.norm of array with NaN must produce NaN (not a finite value)."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([1.0, np.nan, 2.0], dtype=dt)
+        r = float(np.asarray(cpp.linalg.norm(a)).item())
+        assert np.isnan(r), \
+               f"linalg.norm(nan array) should be NaN, got {r} ({dt.__name__})"
+
+
+def test_linalg_norm_inf(cpp):
+    """linalg.norm of array with +∞ must produce +∞."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([1.0, np.inf, 2.0], dtype=dt)
+        r = float(np.asarray(cpp.linalg.norm(a)).item())
+        assert np.isinf(r), \
+               f"linalg.norm(inf array) should be Inf, got {r} ({dt.__name__})"
+
+
+def test_dot_nan(cpp):
+    """dot product with NaN operand must produce NaN."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([1.0, np.nan, 3.0], dtype=dt)
+        b = np.array([4.0, 5.0, 6.0], dtype=dt)
+        r = float(np.asarray(cpp.dot(a, b)).item())
+        assert np.isnan(r), \
+               f"dot(nan,...) should be NaN, got {r} ({dt.__name__})"
+
+
+def test_dot_inf(cpp):
+    """dot([+∞, 0], [1, 0]) = +∞ — infinity propagates through dot."""
+    for dt in [np.float32, np.float64]:
+        a = np.array([np.inf, 0.0], dtype=dt)
+        b = np.array([1.0,    0.0], dtype=dt)
+        r    = float(np.asarray(cpp.dot(a, b)).item())
+        py_r = float(np.dot(a, b))
+        # Both should be +inf (or consistently NaN if BLAS treats it that way)
+        assert (np.isinf(r) and r > 0) == (np.isinf(py_r) and py_r > 0) or \
+               (np.isnan(r) and np.isnan(py_r)), \
+               f"dot(inf,...): C++={r} vs numpy={py_r} ({dt.__name__})"
+
+
+# --- AVX-512 boundary sizes for normal inputs ---
+
+@pytest.mark.parametrize("fn_name,np_fn", [
+    ("exp",    np.exp),
+    ("log",    np.log),
+    ("sin",    np.sin),
+    ("cos",    np.cos),
+], ids=["exp", "log", "sin", "cos"])
+@pytest.mark.parametrize("n", [15, 16, 17, 32], ids=["n15", "n16", "n17", "n32"])
+def test_avx512_boundary_f32(fn_name, np_fn, n, cpp):
+    """Normal finite values at exact AVX-512 vector boundary sizes (f32)."""
+    rng = np.random.RandomState(42)
+    a = (np.abs(rng.randn(n)) + 0.1).astype(np.float32)
+    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
+                       f"{fn_name} f32 n={n}")
 
 
 if __name__ == "__main__":
