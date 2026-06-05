@@ -580,17 +580,136 @@ def test_stack(cpp, dtype):
     arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(4)]
     assert_bit_aligned(cpp.stack(arrays), np.stack(arrays), "stack")
 
-def test_concatenate(cpp, dtype):
+def test_concatenate_1d(cpp, dtype):
     arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concatenate")
+    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concatenate 1d")
+
+def test_concatenate_2d_axis0(cpp, dtype):
+    arrays = [random_array((2, 3), seed=i, dtype=dtype) for i in range(3)]
+    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concatenate 2d axis=0")
+    # Verify default axis=0
+    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concatenate 2d default axis")
+
+def test_concatenate_2d_axis1(cpp, dtype):
+    arrays = [random_array((3, 2), seed=i, dtype=dtype) for i in range(3)]
+    assert_bit_aligned(cpp.concatenate(arrays, 1), np.concatenate(arrays, axis=1), "concatenate 2d axis=1")
+
+def test_concatenate_2d_axis_neg1(cpp, dtype):
+    arrays = [random_array((3, 2), seed=i, dtype=dtype) for i in range(3)]
+    assert_bit_aligned(cpp.concatenate(arrays, -1), np.concatenate(arrays, axis=-1), "concatenate 2d axis=-1")
+
+def test_concatenate_3d_axis0(cpp, dtype):
+    arrays = [random_array((2, 3, 4), seed=i, dtype=dtype) for i in range(2)]
+    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concatenate 3d axis=0")
+
+def test_concatenate_3d_axis1(cpp, dtype):
+    arrays = [random_array((3, 2, 4), seed=i, dtype=dtype) for i in range(2)]
+    assert_bit_aligned(cpp.concatenate(arrays, 1), np.concatenate(arrays, axis=1), "concatenate 3d axis=1")
+
+def test_concatenate_3d_axis2(cpp, dtype):
+    arrays = [random_array((3, 4, 2), seed=i, dtype=dtype) for i in range(2)]
+    assert_bit_aligned(cpp.concatenate(arrays, 2), np.concatenate(arrays, axis=2), "concatenate 3d axis=2")
+
+def test_concatenate_two_arrays(cpp, dtype):
+    arrays = [random_array((5,), seed=0, dtype=dtype), random_array((7,), seed=1, dtype=dtype)]
+    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concatenate two")
+
+def test_concatenate_single(cpp, dtype):
+    arrays = [random_array((5,), dtype=dtype)]
+    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concatenate single")
 
 def test_vstack(cpp, dtype):
     arrays = [random_array((1, 3), seed=i, dtype=dtype) for i in range(4)]
     assert_bit_aligned(cpp.vstack(arrays), np.vstack(arrays), "vstack")
 
+def test_vstack_1d(cpp, dtype):
+    arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(4)]
+    assert_bit_aligned(cpp.vstack(arrays), np.vstack(arrays), "vstack 1d")
+
 def test_hstack(cpp, dtype):
     arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.hstack(arrays), np.hstack(arrays), "hstack")
+    assert_bit_aligned(cpp.hstack(arrays), np.hstack(arrays), "hstack 1d")
+
+def test_hstack_2d(cpp, dtype):
+    arrays = [random_array((3, 2), seed=i, dtype=dtype) for i in range(3)]
+    assert_bit_aligned(cpp.hstack(arrays), np.hstack(arrays), "hstack 2d")
+
+# -- Concatenate complex / edge-case tests ----------------------------------
+
+def test_concatenate_4d_axis0(cpp, dtype):
+    arrays = [random_array((2, 3, 4, 5), seed=i, dtype=dtype) for i in range(2)]
+    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concatenate 4d axis=0")
+
+def test_concatenate_4d_axis2(cpp, dtype):
+    arrays = [random_array((2, 3, 2, 5), seed=i, dtype=dtype) for i in range(2)]
+    assert_bit_aligned(cpp.concatenate(arrays, 2), np.concatenate(arrays, axis=2), "concatenate 4d axis=2")
+
+def test_concatenate_4d_axis_neg2(cpp, dtype):
+    arrays = [random_array((2, 3, 2, 5), seed=i, dtype=dtype) for i in range(2)]
+    assert_bit_aligned(cpp.concatenate(arrays, -2), np.concatenate(arrays, axis=-2), "concatenate 4d axis=-2")
+
+def test_concatenate_unequal_axis_sizes(cpp, dtype):
+    """Concatenate arrays of different sizes along the concatenation axis."""
+    a = random_array((3, 2), seed=1, dtype=dtype)
+    b = random_array((3, 4), seed=2, dtype=dtype)
+    c = random_array((3, 1), seed=3, dtype=dtype)
+    assert_bit_aligned(cpp.concatenate([a, b, c], 1),
+                       np.concatenate([a, b, c], axis=1), "concat unequal axis sizes")
+
+def test_concatenate_many_arrays(cpp, dtype):
+    """Concatenate 10 arrays along axis=0."""
+    arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(10)]
+    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concat 10 arrays")
+
+def test_concatenate_large_3d(cpp, dtype):
+    """Large 3D concatenation along middle axis."""
+    arrays = [random_array((50, 20, 30), seed=i, dtype=dtype) for i in range(3)]
+    assert_bit_aligned(cpp.concatenate(arrays, 1), np.concatenate(arrays, axis=1), "concat large 3d axis=1")
+
+def test_concatenate_large_2d_axis0(cpp, dtype):
+    """Large 2D concatenation — 500 rows each, 4 arrays."""
+    arrays = [random_array((500, 10), seed=i, dtype=dtype) for i in range(4)]
+    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concat large 2d axis=0")
+
+def test_concatenate_large_2d_axis1(cpp, dtype):
+    """Large 2D concatenation — 500 cols each, 3 arrays."""
+    arrays = [random_array((10, 500), seed=i, dtype=dtype) for i in range(3)]
+    assert_bit_aligned(cpp.concatenate(arrays, 1), np.concatenate(arrays, axis=1), "concat large 2d axis=1")
+
+def test_concatenate_identity(cpp, dtype):
+    """Concatenating a single array returns identical copy."""
+    a = random_array((3, 4), seed=42, dtype=dtype)
+    assert_bit_aligned(cpp.concatenate([a], 0), np.concatenate([a], axis=0), "concat identity")
+    assert_bit_aligned(cpp.concatenate([a], 1), np.concatenate([a], axis=1), "concat identity axis=1")
+
+def test_concatenate_zeros(cpp, dtype):
+    """Concatenate arrays of zeros."""
+    a = np.zeros((2, 3), dtype=dtype)
+    b = np.zeros((2, 5), dtype=dtype)
+    assert_bit_aligned(cpp.concatenate([a, b], 1), np.concatenate([a, b], axis=1), "concat zeros")
+
+def test_concatenate_ones(cpp, dtype):
+    """Concatenate arrays of ones."""
+    a = np.ones((3, 2), dtype=dtype)
+    b = np.ones((5, 2), dtype=dtype)
+    assert_bit_aligned(cpp.concatenate([a, b], 0), np.concatenate([a, b], axis=0), "concat ones")
+
+def test_concatenate_3d_axis_neg2(cpp, dtype):
+    """3D concatenate along axis=-2 (middle axis)."""
+    arrays = [random_array((2, 3, 4), seed=i, dtype=dtype) for i in range(3)]
+    assert_bit_aligned(cpp.concatenate(arrays, -2), np.concatenate(arrays, axis=-2), "concat 3d axis=-2")
+
+def test_concatenate_3d_axis_neg3(cpp, dtype):
+    """3D concatenate along axis=-3 (first axis)."""
+    arrays = [random_array((2, 3, 4), seed=i, dtype=dtype) for i in range(2)]
+    assert_bit_aligned(cpp.concatenate(arrays, -3), np.concatenate(arrays, axis=-3), "concat 3d axis=-3")
+
+def test_concatenate_5d(cpp, dtype):
+    """5D concatenate along various axes."""
+    arrays = [random_array((2, 3, 2, 3, 2), seed=i, dtype=dtype) for i in range(2)]
+    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concat 5d axis=0")
+    assert_bit_aligned(cpp.concatenate(arrays, 2), np.concatenate(arrays, axis=2), "concat 5d axis=2")
+    assert_bit_aligned(cpp.concatenate(arrays, -1), np.concatenate(arrays, axis=-1), "concat 5d axis=-1")
 
 def test_where_scalar(cpp, dtype):
     cond = np.array([True, False, True, False, True])

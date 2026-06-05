@@ -196,7 +196,12 @@ PYBIND11_MODULE(numpycpp, m) {
           py::arg("arr"), py::arg("n") = 1, py::arg("axis") = -1);
     m.def("diff", static_cast<py::array_t<float>(*)(const py::array_t<float>&, int, int)>(&numpy::diff),
           py::arg("arr"), py::arg("n") = 1, py::arg("axis") = -1);
-    BIND_F_STACK(stack); BIND_F_STACK(concatenate); BIND_F_STACK(vstack); BIND_F_STACK(hstack);
+    BIND_F_STACK(stack); BIND_F_STACK(vstack); BIND_F_STACK(hstack);
+
+    m.def("concatenate", static_cast<py::array_t<double>(*)(const std::vector<py::array_t<double>>&, int)>(&numpy::concatenate),
+          py::arg("arrays"), py::arg("axis") = 0);
+    m.def("concatenate", static_cast<py::array_t<float>(*)(const std::vector<py::array_t<float>>&, int)>(&numpy::concatenate),
+          py::arg("arrays"), py::arg("axis") = 0);
 
     m.def("where", static_cast<py::array_t<double>(*)(const py::array_t<bool>&, double, double)>(&numpy::where));
     m.def("where", static_cast<py::array_t<float>(*)(const py::array_t<bool>&, float, float)>(&numpy::where));

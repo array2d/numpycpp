@@ -884,28 +884,93 @@ py::array_t<T> stack(const std::vector<py::array_t<T>>& arrays) {
 
 /// numpy.concatenate((a1, a2, ...), axis=0, out=None, dtype=None, casting=...)
 template<typename T>
-py::array_t<T> concatenate(const std::vector<py::array_t<T>>& arrays) {
+py::array_t<T> concatenate(const std::vector<py::array_t<T>>& arrays, int axis = 0) {
     if (arrays.empty()) return py::array_t<T>{};
-    py::ssize_t total = 0;
-    for (const auto& arr : arrays) total += arr.request().size;
-    py::array_t<T> result({total});
-    T* dst = static_cast<T*>(result.request().ptr);
-    py::ssize_t off = 0;
+
+    auto buf0 = arrays[0].request();
+    int ndim = static_cast<int>(buf0.ndim);
+
+    if (axis < 0) axis += ndim;
+    if (axis < 0 || axis >= ndim)
+        throw std::invalid_argument("concatenate: axis out of range");
+
+    // Validate that all arrays have same number of dimensions
     for (const auto& arr : arrays) {
-        auto buf = arr.request();
-        std::memcpy(dst + off, static_cast<const T*>(buf.ptr), buf.size * sizeof(T));
-        off += buf.size;
+        if (arr.request().ndim != ndim)
+            throw std::invalid_argument("concatenate: all arrays must have same number of dimensions");
     }
+
+    // Collect shape (from first array) and per-array axis sizes
+    std::vector<ptrdiff_t> shape(ndim);
+    for (int d = 0; d < ndim; ++d) shape[d] = buf0.shape[d];
+
+    std::vector<size_t> axis_sizes(arrays.size());
+    for (size_t i = 0; i < arrays.size(); ++i) {
+        auto buf = arrays[i].request();
+        axis_sizes[i] = static_cast<size_t>(buf.shape[axis]);
+    }
+
+    // Validate non-axis dimensions match
+    for (size_t i = 0; i < arrays.size(); ++i) {
+        auto buf = arrays[i].request();
+        for (int d = 0; d < ndim; ++d) {
+            if (d == axis) continue;
+            if (buf.shape[d] != shape[d])
+                throw std::invalid_argument(
+                    "concatenate: all arrays must have same shape except along axis");
+        }
+    }
+
+    // Compute output shape
+    std::vector<ptrdiff_t> out_shape = shape;
+    ptrdiff_t total_axis = 0;
+    for (size_t i = 0; i < arrays.size(); ++i)
+        total_axis += static_cast<ptrdiff_t>(axis_sizes[i]);
+    out_shape[axis] = total_axis;
+
+    std::vector<py::ssize_t> py_out_shape(out_shape.begin(), out_shape.end());
+    py::array_t<T> result(py_out_shape);
+    T* dst = static_cast<T*>(result.request().ptr);
+
+    // Build pointer array
+    std::vector<const T*> ptrs(arrays.size());
+    for (size_t i = 0; i < arrays.size(); ++i)
+        ptrs[i] = static_cast<const T*>(arrays[i].request().ptr);
+
+    numpy::concatenate(ptrs.data(), dst, shape.data(), ndim, axis,
+                       axis_sizes.data(), arrays.size());
     return result;
 }
 
 /// numpy.vstack(tup, *, dtype=None, casting=...)
 template<typename T>
-py::array_t<T> vstack(const std::vector<py::array_t<T>>& arrays) { return stack(arrays); }
+py::array_t<T> vstack(const std::vector<py::array_t<T>>& arrays) {
+    if (arrays.empty()) return py::array_t<T>{};
+    int ndim = static_cast<int>(arrays[0].request().ndim);
+    if (ndim == 1) {
+        // numpy.vstack: 1D arrays are reshaped to (1, N) before stacking
+        auto buf0 = arrays[0].request();
+        py::array_t<T> result({static_cast<py::ssize_t>(arrays.size()), static_cast<py::ssize_t>(buf0.size)});
+        T* dst = static_cast<T*>(result.request().ptr);
+        for (size_t i = 0; i < arrays.size(); ++i) {
+            auto buf = arrays[i].request();
+            std::memcpy(dst + i * buf0.size, static_cast<const T*>(buf.ptr),
+                        buf.size * sizeof(T));
+        }
+        return result;
+    }
+    return concatenate(arrays, 0);
+}
 
 /// numpy.hstack(tup, *, dtype=None, casting=...)
 template<typename T>
-py::array_t<T> hstack(const std::vector<py::array_t<T>>& arrays) { return concatenate(arrays); }
+py::array_t<T> hstack(const std::vector<py::array_t<T>>& arrays) {
+    if (arrays.empty()) return py::array_t<T>{};
+    int ndim = static_cast<int>(arrays[0].request().ndim);
+    // 1D arrays: hstack is identical to concatenate along axis=0
+    // 2D+ arrays: hstack concatenates along axis=1
+    return concatenate(arrays, (ndim == 1) ? 0 : 1);
+}
 
 /// numpy.where(condition, x, y) — scalar x, y
 template<typename T>

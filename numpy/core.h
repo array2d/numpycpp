@@ -532,12 +532,104 @@ inline void stack(const T* const* arrays, T* dst, size_t n_arrays, size_t elem_s
 }
 
 /// numpy.concatenate((a1, a2, ...), axis=0, out=None, dtype=None, casting=...)
+/// 1D flat: arrays are treated as flat buffers, concatenated sequentially.
 template<typename T>
 inline void concatenate(const T* const* arrays, T* dst, const size_t* sizes, size_t n_arrays) {
     size_t off = 0;
     for (size_t i = 0; i < n_arrays; ++i) {
         std::memcpy(dst + off, arrays[i], sizes[i] * sizeof(T));
         off += sizes[i];
+    }
+}
+
+/// numpy.concatenate((a1, a2, ...), axis=0, ...) — N-D with axis support.
+/// All arrays must have identical shape except along `axis`.
+/// `shape` is the representative common shape (use first array's shape);
+/// `axis_sizes[i]` gives the size of array i along the concatenation axis.
+///
+/// Strategy: iterate over "leading slices" (product of dims before axis).
+/// Within each slice, every array contributes a contiguous block of
+/// `axis_sizes[i] * trailing` elements.  Since the elements are C-contiguous
+/// within each slice, a single memcpy per array per slice suffices.
+template<typename T>
+inline void concatenate(const T* const* arrays, T* dst,
+                         const ptrdiff_t* shape, int ndim, int axis,
+                         const size_t* axis_sizes, size_t n_arrays) {
+    if (n_arrays == 0 || ndim == 0) return;
+
+    // Normalize axis
+    if (axis < 0) axis += ndim;
+
+    // Trailing product = product of dims after axis (also = stride along axis)
+    ptrdiff_t trailing = 1;
+    for (int d = axis + 1; d < ndim; ++d) trailing *= shape[d];
+
+    // Total output axis size
+    ptrdiff_t out_axis = 0;
+    for (size_t i = 0; i < n_arrays; ++i)
+        out_axis += static_cast<ptrdiff_t>(axis_sizes[i]);
+
+    // Per-array full strides (differ because axis dim sizes differ)
+    // C-contiguous: stride[d] = stride[d+1] * size_of_dim[d+1].
+    // Use axis_sizes[k] when d+1 == axis, common shape otherwise.
+    std::vector<std::vector<ptrdiff_t>> in_stride(n_arrays);
+    for (size_t k = 0; k < n_arrays; ++k) {
+        in_stride[k].resize(ndim);
+        in_stride[k][ndim - 1] = 1;
+        for (int d = ndim - 2; d >= 0; --d) {
+            ptrdiff_t s = (d + 1 == axis)
+                ? static_cast<ptrdiff_t>(axis_sizes[k])
+                : shape[d + 1];
+            in_stride[k][d] = in_stride[k][d + 1] * s;
+        }
+    }
+
+    // Output strides
+    std::vector<ptrdiff_t> out_shape(shape, shape + ndim);
+    out_shape[axis] = out_axis;
+    std::vector<ptrdiff_t> out_stride(ndim);
+    out_stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        out_stride[d] = out_stride[d + 1] * out_shape[d + 1];
+
+    // Per-array per-slice element count (contiguous elements contributed per slice)
+    std::vector<size_t> slice_n(n_arrays);
+    for (size_t i = 0; i < n_arrays; ++i)
+        slice_n[i] = static_cast<size_t>(axis_sizes[i]) * static_cast<size_t>(trailing);
+
+    // Number of leading slices
+    ptrdiff_t n_slices = 1;
+    for (int d = 0; d < axis; ++d) n_slices *= shape[d];
+
+    // Total per-array byte size of one slice (for output position stepping)
+    ptrdiff_t out_slice_bytes = static_cast<ptrdiff_t>(
+        static_cast<size_t>(out_axis) * static_cast<size_t>(trailing) * sizeof(T));
+
+    // For each leading slice, copy contiguous blocks from each array
+    for (ptrdiff_t s = 0; s < n_slices; ++s) {
+        // Decompose slice index → multi-index for dims 0..axis-1
+        ptrdiff_t rem = s;
+
+        // Per-array leading offset within the array
+        std::vector<size_t> in_off(n_arrays, 0);
+
+        for (int d = axis - 1; d >= 0; --d) {
+            ptrdiff_t idx = rem % shape[d];
+            rem /= shape[d];
+            for (size_t k = 0; k < n_arrays; ++k)
+                in_off[k] += static_cast<size_t>(idx) * static_cast<size_t>(in_stride[k][d]);
+        }
+
+        // Output position for this slice
+        char* out_slice_start = reinterpret_cast<char*>(dst) + s * out_slice_bytes;
+        size_t out_byte_off = 0;
+
+        for (size_t i = 0; i < n_arrays; ++i) {
+            size_t bytes = slice_n[i] * sizeof(T);
+            std::memcpy(out_slice_start + out_byte_off,
+                        arrays[i] + in_off[i], bytes);
+            out_byte_off += bytes;
+        }
     }
 }
 
