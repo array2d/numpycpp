@@ -1,16 +1,29 @@
-// Native C++ implementations — zero pybind11 dependency.
-// All functions operate on raw pointers + sizes.
+// ════════════════════════════════════════════════════════════════════════════
+//  numpycpp — public C++ API  (zero pybind11 dependency)
+//  The ONLY header external code should include:
 //
-// Usable by any C++ project via #include "numpy/core.h"
+//      #include "numpy/core.h"
 //
-// Convention: each function is annotated with its Python numpy equivalent,
-// e.g. /// numpy.sqrt(x, /, out=None, *, where=True, ...)
+//  Public namespace:   numpy::           e.g.  numpy::exp(src, dst, n)
+//  Internal namespace: numpy::detail::   ← DO NOT CALL DIRECTLY
 //
-// Acceleration (安全优化，保持 bit-exact 对齐):
-//   - Loop unrolling (4x) for element-wise functions
-//   - Stack allocation for small buffers (n ≤ 128)
-//   - Reusable fiber buffer in axis reductions
-//   - Fused multiply-accumulate in norm_sq/dot
+//  The four internal headers pulled in below are LOCKED behind
+//  NUMPYCPP_INTERNAL_INCLUDE and will cause a #error if included directly:
+//    • svml_bridge.h   — SVML/npy scalar bridge  (x86_64 + Linux)
+//    • blas_bridge.h   — OpenBLAS ILP64 bridge   (x86_64 + Linux)
+//    • npy_math_float.h— float32 poly kernels    (numpy internal constants)
+//    • avx512_loops.h  — AVX-512 specializations (requires AVX-512F CPU)
+//
+//  All functions operate on raw pointers + sizes.
+//  Each function is annotated with its Python numpy equivalent,
+//  e.g. /// numpy.sqrt(x, /, out=None, *, where=True, ...)
+//
+//  Acceleration (安全优化，保持 bit-exact 对齐):
+//    - Loop unrolling (4x) for element-wise functions
+//    - Stack allocation for small buffers (n ≤ 128)
+//    - Reusable fiber buffer in axis reductions
+//    - Fused multiply-accumulate in norm_sq/dot
+// ════════════════════════════════════════════════════════════════════════════
 
 #pragma once
 
@@ -22,8 +35,15 @@
 #include <cstddef>
 #include <stdexcept>
 
-#include "svml_bridge.h"
-#include "blas_bridge.h"
+// ── Internal headers ─────────────────────────────────────────────────────────
+// These files contain arch/OS-specific implementations (SVML/AVX-512/BLAS/npy).
+// They MUST NOT be included directly by external code.
+// The macro below is the compile-time lock; it is #undef-ed at the end of this
+// file so it cannot "leak" into translation units that include core.h.
+#define NUMPYCPP_INTERNAL_INCLUDE
+#include "svml_bridge.h"   // numpy::detail::{exp,log,sin,...}_f32/f64 — SVML/npy
+#include "blas_bridge.h"   // numpy::detail::blas_ops<T> — OpenBLAS ILP64
+// avx512_loops.h included at namespace-close (line ~1004), also guarded.
 
 namespace numpy {
 
@@ -1002,5 +1022,8 @@ inline void norm_axis(const T* src, T* dst, const ptrdiff_t* shape, int ndim, in
 // Must be included inside namespace numpy after all primary templates.
 // ============================================================================
 #include "avx512_loops.h"
+
+// Release the internal-include lock so it does not pollute the includer's TU.
+#undef NUMPYCPP_INTERNAL_INCLUDE
 
 } // namespace numpy

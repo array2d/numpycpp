@@ -1,13 +1,20 @@
-// INTERNAL HEADER — DO NOT INCLUDE DIRECTLY.
-// Use #include "numpy/core.h" which pulls this in automatically.
-//
-// All functions live in numpy::detail — do not call directly.
-// Use numpy::exp() etc. from core.h.
-//
-// Bit-exact float32 math matching numpy 1.23.5 SIMD polynomial approximations.
-// Replicates numpy's simd_exp_FLOAT, simd_log_FLOAT, simd_sincos_f32 algorithms.
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  INTERNAL HEADER — DIRECT INCLUSION IS A COMPILE ERROR                 ║
+// ║                                                                          ║
+// ║  This file implements arch/OS-specific float32 polynomial kernels that  ║
+// ║  are tied to numpy's internal SIMD constants.  The API is UNSTABLE and  ║
+// ║  subject to change without notice.                                       ║
+// ║                                                                          ║
+// ║  ✗  #include "numpy/npy_math_float.h"   ← compile error                ║
+// ║  ✓  #include "numpy/core.h"             ← only correct entry point      ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
 
 #pragma once
+
+#ifndef NUMPYCPP_INTERNAL_INCLUDE
+#  error "npy_math_float.h is an internal header — do not include directly. \
+Use #include \"numpy/core.h\" instead."
+#endif
 
 #include <cstdint>
 #include <cstring>

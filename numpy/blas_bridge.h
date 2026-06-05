@@ -1,5 +1,15 @@
-// INTERNAL HEADER — auto-included by core.h and linalg.h.
-// DO NOT include directly.
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  INTERNAL HEADER — DIRECT INCLUSION IS A COMPILE ERROR                 ║
+// ║                                                                          ║
+// ║  This file wraps OpenBLAS ILP64 (Linux x86_64 only) via dlsym/dlopen.  ║
+// ║  All symbols live in numpy::detail — an implementation namespace that   ║
+// ║  external code must never reference.                                     ║
+// ║                                                                          ║
+// ║  ✗  #include "numpy/blas_bridge.h"      ← compile error                ║
+// ║  ✗  numpy::detail::blas_sdot(...)       ← undefined behaviour          ║
+// ║  ✓  #include "numpy/core.h"             ← only correct entry point      ║
+// ║  ✓  numpy::dot(a, b, n)                 ← public API                    ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // BLAS bridge — bit-exact dot/norm vs numpy's OpenBLAS-backed np.dot /
 // np.linalg.norm (without axis).
@@ -21,6 +31,11 @@
 // Fallback (if OpenBLAS not discovered): sequential accumulation.
 
 #pragma once
+
+#ifndef NUMPYCPP_INTERNAL_INCLUDE
+#  error "blas_bridge.h is an internal header — do not include directly. \
+Use #include \"numpy/core.h\" instead."
+#endif
 
 #include <cstdint>
 #include <cmath>

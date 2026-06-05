@@ -1,22 +1,30 @@
-// INTERNAL HEADER — DO NOT INCLUDE DIRECTLY.
-// Use #include "numpy/core.h" which pulls this in automatically.
-//
-// All functions live in numpy::detail — do not call numpy::detail::exp()
-// directly. Use numpy::exp() from core.h.
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  INTERNAL HEADER — DIRECT INCLUSION IS A COMPILE ERROR                 ║
+// ║                                                                          ║
+// ║  This file bridges numpycpp to numpy's SVML / npy_* scalar kernels.    ║
+// ║  It is x86_64 + Linux specific (dlsym, /proc/self/maps, AVX-512).      ║
+// ║  All symbols live in numpy::detail — an implementation namespace that   ║
+// ║  external code must never reference.                                     ║
+// ║                                                                          ║
+// ║  ✗  #include "numpy/svml_bridge.h"      ← compile error                ║
+// ║  ✗  numpy::detail::exp_svml_f64(x)      ← undefined behaviour          ║
+// ║  ✓  #include "numpy/core.h"             ← only correct entry point      ║
+// ║  ✓  numpy::exp(src, dst, n)             ← public API                    ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // SVML/npy bridge — bit-exact math on every x86_64 architecture.
-//
-// numpy uses different math implementations depending on CPU features:
-//   AVX-512 HW → __svml_exp8 (SVML vector) → resolves via dlsym
-//   non-AVX-512 → npy_exp (scalar)        → resolves via dlsym
-//
-// This header detects CPU features at RUNTIME and selects the matching path.
-// AVX-512 intrinsics are isolated behind __attribute__((target("avx512f")))
-// so the binary is safe on non-AVX-512 CPUs — no SIGILL.
-//
+//   AVX-512 HW → __svml_exp8 (SVML vector) → resolved via dlsym
+//   non-AVX-512 → npy_exp (scalar)         → resolved via dlsym
+// CPU feature detection is at RUNTIME; AVX-512 intrinsics are isolated behind
+// __attribute__((target("avx512f"))) — safe on non-AVX-512 CPUs (no SIGILL).
 // The .so path is auto-discovered via /proc/self/maps — no manual init needed.
 
 #pragma once
+
+#ifndef NUMPYCPP_INTERNAL_INCLUDE
+#  error "svml_bridge.h is an internal header — do not include directly. \
+Use #include \"numpy/core.h\" instead."
+#endif
 
 #include <cmath>
 #include <cstdio>

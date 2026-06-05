@@ -1,5 +1,13 @@
-// INTERNAL HEADER — included at the bottom of core.h, inside namespace numpy.
-// DO NOT include directly.
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  INTERNAL HEADER — DIRECT INCLUSION IS A COMPILE ERROR                 ║
+// ║                                                                          ║
+// ║  This file contains AVX-512 template specializations that override the  ║
+// ║  generic loops in core.h.  It is x86_64 + AVX-512F specific and must   ║
+// ║  be included INSIDE namespace numpy at the end of core.h — nowhere else.║
+// ║                                                                          ║
+// ║  ✗  #include "numpy/avx512_loops.h"     ← compile error                ║
+// ║  ✓  #include "numpy/core.h"             ← only correct entry point      ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // AVX-512 wide-loop specializations for array math functions.
 //
@@ -18,6 +26,12 @@
 //     Previously these called noinline helpers → 32768 call/returns per 524k array.
 
 #pragma once
+
+#ifndef NUMPYCPP_INTERNAL_INCLUDE
+#  error "avx512_loops.h is an internal header — do not include directly. \
+Use #include \"numpy/core.h\" instead."
+#endif
+
 #ifdef __AVX512F__
 #include <immintrin.h>
 
