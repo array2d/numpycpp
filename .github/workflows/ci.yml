@@ -53,8 +53,8 @@ jobs:
       - name: Verify AVX-512 support
         run: |
           grep -q avx512f /proc/cpuinfo \
-            && echo "✓ AVX-512 supported" \
-            || (echo "✗ AVX-512 not detected — tests may SIGILL"; exit 1)
+            && echo "✓ AVX-512 supported — SVML vector path active" \
+            || echo "⚠ AVX-512 not detected — SVML bridge falls back to scalar npy_* (still bit-exact)"
 
       - name: Configure
         run: cmake -S tests -B tests/build -DCMAKE_BUILD_TYPE=Release

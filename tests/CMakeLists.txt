@@ -23,12 +23,23 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
 # pybind11 — prefer the copy installed alongside Python
+# pybind11 v2.x uses --cmake; v3.x uses --cmakedir — try both
 execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -m pybind11 --cmake
+    COMMAND "${Python3_EXECUTABLE}" -m pybind11 --cmakedir
     OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
     OUTPUT_STRIP_TRAILING_WHITESPACE
     RESULT_VARIABLE _pybind11_cmake_result
+    ERROR_QUIET
 )
+if(NOT (_pybind11_cmake_result EQUAL 0 AND EXISTS "${PYBIND11_CMAKE_DIR}"))
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -m pybind11 --cmake
+        OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _pybind11_cmake_result
+        ERROR_QUIET
+    )
+endif()
 if(_pybind11_cmake_result EQUAL 0 AND EXISTS "${PYBIND11_CMAKE_DIR}")
     find_package(pybind11 CONFIG REQUIRED
         PATHS "${PYBIND11_CMAKE_DIR}" NO_DEFAULT_PATH)
