@@ -245,6 +245,10 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("dot", static_cast<double(*)(const py::array_t<double>&, const py::array_t<double>&)>(&numpy::dot));
     m.def("dot", static_cast<float(*)(const py::array_t<float>&, const py::array_t<float>&)>(&numpy::dot));
 
+    // -- Matmul ------------------------------------------------------------
+    m.def("matmul", static_cast<py::array_t<double>(*)(const py::array_t<double>&, const py::array_t<double>&)>(&numpy::matmul));
+    m.def("matmul", static_cast<py::array_t<float>(*)(const py::array_t<float>&, const py::array_t<float>&)>(&numpy::matmul));
+
     // -- Einsum ------------------------------------------------------------
     m.def("einsum", static_cast<py::array_t<double>(*)(const std::string&, const py::array_t<double>&, const py::array_t<double>&)>(&numpy::einsum));
     m.def("einsum", static_cast<py::array_t<float>(*)(const std::string&, const py::array_t<float>&, const py::array_t<float>&)>(&numpy::einsum));

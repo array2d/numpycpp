@@ -1496,3 +1496,66 @@ if __name__ == "__main__":
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     sys.exit(pytest.main([__file__, "-q", "--tb=short", "--no-header"]))
+
+
+# =============================================================================
+# Section 17: numpy.matmul — bit-exact via cblas_sgemm64_ / cblas_sgemv64_
+# =============================================================================
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["float64","float32"])
+@pytest.mark.parametrize("M,K,N", [
+    (1,  1,  1),
+    (3,  4,  5),
+    (5,  3,  1),
+    (1,  8,  4),
+    (16, 16, 16),
+    (50, 64, 50),
+    (100,100,100),
+], ids=["1x1x1","3x4x5","5x3x1","1x8x4","16x16x16","50x64x50","100x100x100"])
+def test_matmul_2d(dtype, M, K, N, cpp):
+    """2D matmul: C(M,N) = A(M,K) @ B(K,N)  — cblas_sgemm64_, 0 ULP."""
+    rng = np.random.RandomState(M * 1000 + K * 100 + N)
+    A = rng.randn(M, K).astype(dtype)
+    B = rng.randn(K, N).astype(dtype)
+    assert_bit_aligned(cpp.matmul(A, B), np.matmul(A, B),
+                       f"matmul 2D ({M},{K})@({K},{N}) {dtype.__name__}")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["float64","float32"])
+@pytest.mark.parametrize("K,N", [(1,1),(8,5),(16,7),(64,32)],
+                          ids=["1x1","8x5","16x7","64x32"])
+def test_matmul_1d_2d(dtype, K, N, cpp):
+    """1D × 2D matmul: y(N,) = a(K,) @ B(K,N)  — cblas_sgemv64_ Trans, 0 ULP."""
+    rng = np.random.RandomState(K * 100 + N)
+    a = rng.randn(K).astype(dtype)
+    B = rng.randn(K, N).astype(dtype)
+    assert_bit_aligned(cpp.matmul(a, B), np.matmul(a, B),
+                       f"matmul 1D×2D ({K},)@({K},{N}) {dtype.__name__}")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["float64","float32"])
+@pytest.mark.parametrize("M,K", [(1,1),(5,8),(7,16),(32,64)],
+                          ids=["1x1","5x8","7x16","32x64"])
+def test_matmul_2d_1d(dtype, M, K, cpp):
+    """2D × 1D matmul: y(M,) = A(M,K) @ x(K,)  — cblas_sgemv64_ NoTrans, 0 ULP."""
+    rng = np.random.RandomState(M * 100 + K)
+    A = rng.randn(M, K).astype(dtype)
+    x = rng.randn(K).astype(dtype)
+    assert_bit_aligned(cpp.matmul(A, x), np.matmul(A, x),
+                       f"matmul 2D×1D ({M},{K})@({K},) {dtype.__name__}")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["float64","float32"])
+@pytest.mark.parametrize("batch,M,K,N", [
+    (1, 2, 3, 4),
+    (4, 3, 5, 6),
+    (8, 16, 32, 16),
+    (3, 50, 64, 50),
+], ids=["1x2x3x4","4x3x5x6","8x16x32x16","3x50x64x50"])
+def test_matmul_batched(dtype, batch, M, K, N, cpp):
+    """Batched 3D matmul: C(B,M,N) = A(B,M,K) @ B(B,K,N)  — loop gemm, 0 ULP."""
+    rng = np.random.RandomState(batch * 10000 + M * 1000 + K * 100 + N)
+    A = rng.randn(batch, M, K).astype(dtype)
+    B = rng.randn(batch, K, N).astype(dtype)
+    assert_bit_aligned(cpp.matmul(A, B), np.matmul(A, B),
+                       f"matmul 3D ({batch},{M},{K})@({batch},{K},{N}) {dtype.__name__}")

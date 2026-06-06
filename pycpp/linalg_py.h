@@ -52,4 +52,49 @@ T dot(const py::array_t<T>& a, const py::array_t<T>& b) {
                              std::min(ba.size, bb.size));
 }
 
+/// numpy.matmul(a, b) — bit-exact via cblas_sgemm64_ (same kernel as numpy)
+/// Supported shapes (mirrors numpy.matmul rules):
+///   2D × 2D:  (M,K) @ (K,N) → (M,N)
+///   1D × 2D:  (K,)  @ (K,N) → (N,)      [treated as (1,K) @ (K,N), result squeezed]
+///   2D × 1D:  (M,K) @ (K,)  → (M,)      [treated as (M,K) @ (K,1), result squeezed]
+///   3D × 3D:  (B,M,K) @ (B,K,N) → (B,M,N)  [batched loop, one gemm per batch]
+template<typename T>
+py::array_t<T> matmul(const py::array_t<T>& a, const py::array_t<T>& b) {
+    auto ba = a.request(), bb = b.request();
+    const T* A = static_cast<const T*>(ba.ptr);
+    const T* B = static_cast<const T*>(bb.ptr);
+
+    // 2D × 2D
+    if (ba.ndim == 2 && bb.ndim == 2) {
+        size_t M = ba.shape[0], K = ba.shape[1], N = bb.shape[1];
+        py::array_t<T> out({(py::ssize_t)M, (py::ssize_t)N});
+        T* C = static_cast<T*>(out.request().ptr);
+        // matmul_slice mirrors numpy's sdot/gemv/gemm dispatch exactly
+        numpy::linalg::matmul(A, B, C, M, K, N);
+        return out;
+    }
+    // 1D × 2D: (K,) @ (K,N) → (N,)   uses cblas_*gemv64_ Trans
+    if (ba.ndim == 1 && bb.ndim == 2) {
+        size_t K = ba.shape[0], N = bb.shape[1];
+        py::array_t<T> out({(py::ssize_t)N});
+        numpy::linalg::matmul_vm(A, B, static_cast<T*>(out.request().ptr), K, N);
+        return out;
+    }
+    // 2D × 1D: (M,K) @ (K,) → (M,)   uses cblas_*gemv64_ NoTrans
+    if (ba.ndim == 2 && bb.ndim == 1) {
+        size_t M = ba.shape[0], K = ba.shape[1];
+        py::array_t<T> out({(py::ssize_t)M});
+        numpy::linalg::matmul_mv(A, B, static_cast<T*>(out.request().ptr), M, K);
+        return out;
+    }
+    // batched 3D × 3D: (B,M,K) @ (B,K,N) → (B,M,N)
+    if (ba.ndim == 3 && bb.ndim == 3) {
+        size_t batch = ba.shape[0], M = ba.shape[1], K = ba.shape[2], N = bb.shape[2];
+        py::array_t<T> out({(py::ssize_t)batch, (py::ssize_t)M, (py::ssize_t)N});
+        numpy::linalg::matmul(A, B, static_cast<T*>(out.request().ptr), batch, M, K, N);
+        return out;
+    }
+    throw std::invalid_argument("matmul: unsupported ndim combination");
+}
+
 } // namespace numpy
