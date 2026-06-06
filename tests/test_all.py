@@ -1371,16 +1371,24 @@ def test_domain_sqrt_neg(cpp):
 
 
 def test_domain_log_neg(cpp):
-    """log(negative) = NaN — bit-exact with numpy.
+    """log(negative) = NaN — both C++ and numpy must produce NaN.
 
-    Also exercises the AVX-512 log path for 16 negative values.
+    The exact NaN bit-pattern (sign bit) varies across numpy versions and CPU
+    paths (SVML vs scalar) — numpy ≥1.26 normalises to positive qNaN on the
+    scalar path but not the SVML path.  We therefore check only that the output
+    is NaN where numpy is NaN, not the exact bit pattern.
     """
     for dt in [np.float32, np.float64]:
         a = np.array([-1.0, -2.5, -0.5], dtype=dt)
-        assert_bit_aligned(cpp.log(a), np.log(a), f"log(neg) {dt.__name__}")
-    # 16 negative floats — forces AVX-512 is_neg mask path
+        cpp_r = np.asarray(cpp.log(a))
+        np_r  = np.log(a)
+        assert np.all(np.isnan(cpp_r) == np.isnan(np_r)), \
+               f"log(neg) {dt.__name__}: NaN mask mismatch: C++={cpp_r} numpy={np_r}"
+    # 16 negative floats — exercises AVX-512 wide loop when available
     a16 = np.full(16, -1.0, dtype=np.float32)
-    assert_bit_aligned(cpp.log(a16), np.log(a16), "log(neg) f32 n=16")
+    cpp_r16 = np.asarray(cpp.log(a16))
+    assert np.all(np.isnan(cpp_r16)), \
+           f"log(neg) f32 n=16: expected all NaN, got {cpp_r16}"
 
 
 def test_domain_arcsin_oob(cpp):

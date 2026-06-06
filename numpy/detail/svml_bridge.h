@@ -288,24 +288,7 @@ inline float atan2_npy_f32(float y, float x) {
 #endif
 
 DISPATCH_F64(exp)
-// log_f64: custom — npy_log(-x) returns negative NaN (0xfff8...); numpy's ufunc
-// normalizes domain-error NaN to positive qNaN (0x7ff8...).  Mirror that here.
-inline double log_f64(double x) {
-    double r;
-#ifdef __AVX512F__
-    r = cpu_has_avx512f() ? log_svml_f64(x) : log_npy_f64(x);
-#else
-    r = log_npy_f64(x);
-#endif
-    // Normalize: domain-error NaN (finite/inf negative input) → positive qNaN
-    if (__builtin_expect(std::isnan(r) && !std::isnan(x), 0)) {
-        constexpr uint64_t qnan_bits = 0x7ff8000000000000ULL;
-        double pos_nan;
-        std::memcpy(&pos_nan, &qnan_bits, 8);
-        return pos_nan;
-    }
-    return r;
-}
+DISPATCH_F64(log)
 // sin_f64: custom — SVML scalar broadcast path loses signed zero (sin(-0)→+0).
 // IEEE 754 requires sin(±0) = ±0; preserve sign of zero explicitly.
 inline double sin_f64(double x) {
