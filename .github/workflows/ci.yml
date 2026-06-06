@@ -41,7 +41,7 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Install Python dependencies
-        run: pip install "numpy>=1.23" pybind11 pytest cmake
+        run: pip install "numpy>=1.23,<2.0" pybind11 pytest cmake
 
       - name: Install system dependencies
         run: |
@@ -50,11 +50,27 @@ jobs:
           # libgomp1 (OpenMP runtime) and omp.h (OpenMP headers) are bundled
           # with GCC on Ubuntu 24.04 — no separate libgomp1-dev package exists
 
-      - name: Verify AVX-512 support
+      - name: Diagnose numpy symbols
         run: |
+          python -c "
+import numpy, subprocess, glob, os, ctypes
+print('numpy version:', numpy.__version__)
+# Find _multiarray_umath.so
+so = None
+for d in ['core', '_core']:
+    for f in glob.glob(os.path.join(os.path.dirname(numpy.__file__), d, '_multiarray_umath*.so')):
+        so = f; break
+    if so: break
+print('numpy so:', so)
+if so:
+    r = subprocess.run(['nm', '-D', so], capture_output=True, text=True)
+    for sym in ['npy_exp', '__svml_exp8', 'npy_log', 'cblas_sdot64_', 'cblas_sdot']:
+        found = any(sym in l for l in r.stdout.splitlines())
+        print(f'  {sym}: {\"found\" if found else \"NOT found\"}')
+"
           grep -q avx512f /proc/cpuinfo \
-            && echo "✓ AVX-512 supported — SVML vector path active" \
-            || echo "⚠ AVX-512 not detected — SVML bridge falls back to scalar npy_* (still bit-exact)"
+            && echo "✓ AVX-512 supported" \
+            || echo "⚠ AVX-512 not in cpuinfo"
 
       - name: Configure
         run: cmake -S tests -B tests/build -DCMAKE_BUILD_TYPE=Release
