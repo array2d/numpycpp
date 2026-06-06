@@ -767,7 +767,7 @@ template<typename T>
 py::array_t<T> hypot(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();
     py::array_t<T> result(ba.shape);
-    hypot_array(static_cast<const T*>(ba.ptr),
+    hypot(static_cast<const T*>(ba.ptr),
                         static_cast<const T*>(bb.ptr),
                         static_cast<T*>(result.request().ptr),
                         std::min(ba.size, bb.size));
@@ -779,7 +779,7 @@ template<typename T>
 py::array_t<T> arctan2(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();
     py::array_t<T> result(ba.shape);
-    arctan2_array(static_cast<const T*>(ba.ptr),
+    arctan2(static_cast<const T*>(ba.ptr),
                           static_cast<const T*>(bb.ptr),
                           static_cast<T*>(result.request().ptr),
                           std::min(ba.size, bb.size));
@@ -791,7 +791,7 @@ template<typename T>
 py::array_t<T> arctan2(const py::array_t<T>& a, T b) {
     auto buf = a.request();
     py::array_t<T> result(buf.shape);
-    arctan2_scalar(static_cast<const T*>(buf.ptr),
+    arctan2(static_cast<const T*>(buf.ptr),
                            static_cast<T*>(result.request().ptr), buf.size, b);
     return result;
 }
@@ -801,7 +801,7 @@ template<typename T>
 py::array_t<T> maximum(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();
     py::array_t<T> result(ba.shape);
-    maximum_array(static_cast<const T*>(ba.ptr),
+    maximum(static_cast<const T*>(ba.ptr),
                           static_cast<const T*>(bb.ptr),
                           static_cast<T*>(result.request().ptr),
                           std::min(ba.size, bb.size));
@@ -813,7 +813,7 @@ template<typename T>
 py::array_t<T> maximum(const py::array_t<T>& a, T b) {
     auto buf = a.request();
     py::array_t<T> result(buf.shape);
-    maximum_scalar(static_cast<const T*>(buf.ptr),
+    maximum(static_cast<const T*>(buf.ptr),
                            static_cast<T*>(result.request().ptr), buf.size, b);
     return result;
 }
@@ -823,7 +823,7 @@ template<typename T>
 py::array_t<T> minimum(const py::array_t<T>& a, const py::array_t<T>& b) {
     auto ba = a.request(), bb = b.request();
     py::array_t<T> result(ba.shape);
-    minimum_array(static_cast<const T*>(ba.ptr),
+    minimum(static_cast<const T*>(ba.ptr),
                           static_cast<const T*>(bb.ptr),
                           static_cast<T*>(result.request().ptr),
                           std::min(ba.size, bb.size));
@@ -835,7 +835,7 @@ template<typename T>
 py::array_t<T> minimum(const py::array_t<T>& a, T b) {
     auto buf = a.request();
     py::array_t<T> result(buf.shape);
-    minimum_scalar(static_cast<const T*>(buf.ptr),
+    minimum(static_cast<const T*>(buf.ptr),
                            static_cast<T*>(result.request().ptr), buf.size, b);
     return result;
 }

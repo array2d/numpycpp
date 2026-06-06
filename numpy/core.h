@@ -452,40 +452,40 @@ inline void isfinite(const T* src, bool* dst, size_t n) {
 // Binary element-wise — 2 arrays T in → T out
 // ============================================================================
 
-/// numpy.hypot(x1, x2, /, out=None, *, where=True, ...) — array-array
+/// numpy.hypot(x1, x2, /, out=None, *, where=True, ...)
 template<typename T>
-inline void hypot_array(const T* a, const T* b, T* dst, size_t n) {
+inline void hypot(const T* a, const T* b, T* dst, size_t n) {
     NUMPY_UNROLL4(i, dst[i] = detail::hypot(a[i], b[i]));
 }
 
 /// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
-inline void arctan2_array(const T* a, const T* b, T* dst, size_t n) {
+inline void arctan2(const T* a, const T* b, T* dst, size_t n) {
     NUMPY_UNROLL4(i, dst[i] = detail::atan2(a[i], b[i]));
 }
 /// numpy.arctan2(x1, x2, /, out=None, *, where=True, ...) — array-scalar
 template<typename T>
-inline void arctan2_scalar(const T* src, T* dst, size_t n, T b) {
+inline void arctan2(const T* src, T* dst, size_t n, T b) {
     NUMPY_UNROLL4(i, dst[i] = detail::atan2(src[i], b));
 }
 /// numpy.maximum(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
-inline void maximum_array(const T* a, const T* b, T* dst, size_t n) {
+inline void maximum(const T* a, const T* b, T* dst, size_t n) {
     NUMPY_UNROLL4(i, dst[i] = std::max(a[i], b[i]));
 }
-/// numpy.maximum(x1, x2, /, out=None, *, where=True, ...) — scalar variant
+/// numpy.maximum(x1, x2, /, out=None, *, where=True, ...) — array-scalar
 template<typename T>
-inline void maximum_scalar(const T* src, T* dst, size_t n, T b) {
+inline void maximum(const T* src, T* dst, size_t n, T b) {
     NUMPY_UNROLL4(i, dst[i] = std::max(src[i], b));
 }
 /// numpy.minimum(x1, x2, /, out=None, *, where=True, ...) — array-array
 template<typename T>
-inline void minimum_array(const T* a, const T* b, T* dst, size_t n) {
+inline void minimum(const T* a, const T* b, T* dst, size_t n) {
     NUMPY_UNROLL4(i, dst[i] = std::min(a[i], b[i]));
 }
-/// numpy.minimum(x1, x2, /, out=None, *, where=True, ...) — scalar variant
+/// numpy.minimum(x1, x2, /, out=None, *, where=True, ...) — array-scalar
 template<typename T>
-inline void minimum_scalar(const T* src, T* dst, size_t n, T b) {
+inline void minimum(const T* src, T* dst, size_t n, T b) {
     NUMPY_UNROLL4(i, dst[i] = std::min(src[i], b));
 }
 
