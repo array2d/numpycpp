@@ -69,7 +69,12 @@ endif()
 target_compile_options(numpycpp PRIVATE
     -O2
     -ffp-contract=off          # no implicit FMA for a+b*c (keeps Cody-Waite exact)
-    -msse4.1 -mavx512f -mfma  # enable AVX-512 code paths
+    -msse4.1 -mavx512f -mfma  # -mavx512f needed to compile AVX-512 intrinsics
+    -mprefer-vector-width=256  # prevent auto-vectorizer from emitting 512-bit (ZMM)
+                               # instructions globally; Azure VMs expose avx512f in
+                               # cpuinfo but may have ZMM state disabled by hypervisor
+                               # → explicit __attribute__((target("avx512f"))) + runtime
+                               # __builtin_cpu_supports guard handles AVX-512 safely
     # disable builtin replacements so our calls go through SVML/npy_math paths
     -fno-builtin-exp   -fno-builtin-log   -fno-builtin-sin
     -fno-builtin-cos   -fno-builtin-tan   -fno-builtin-pow

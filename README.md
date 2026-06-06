@@ -114,8 +114,9 @@ caused at least one test failure are marked **required**.
 
 ```cmake
 target_compile_options(<target> PRIVATE
-    -ffp-contract=off   # REQUIRED — see below
-    -mavx512f -mfma     # REQUIRED — see below
+    -ffp-contract=off          # REQUIRED — see below
+    -mavx512f -mfma            # REQUIRED — see below
+    -mprefer-vector-width=256  # REQUIRED — see below
 )
 target_link_libraries(<target> PRIVATE dl)   # REQUIRED — dlsym
 ```
@@ -124,6 +125,7 @@ target_link_libraries(<target> PRIVATE dl)   # REQUIRED — dlsym
 |------|-------------|-------------------------------|
 | `-ffp-contract=off` | Prevents the compiler from silently fusing `a*b + c` into a single FMA instruction. numpycpp's einsum accumulation loops must use the same multiply-then-add order as numpy's BLAS kernels. | 36 einsum tests fail with ±1 ULP differences. |
 | `-mavx512f -mfma` | The SVML bridge declares fast scalar wrappers (`exp_svml_f64`, etc.) inside `#ifdef __AVX512F__`. Without this flag the preprocessor omits those declarations and the dispatcher fails to compile. AVX-512 intrinsics are runtime-guarded via `__builtin_cpu_supports` — the binary is safe on non-AVX-512 CPUs. | Hard compile error: `'exp_svml_f64' was not declared in this scope`. |
+| `-mprefer-vector-width=256` | Prevents the GCC auto-vectorizer from emitting 512-bit (ZMM) instructions globally. Some cloud VMs expose `avx512f` in `/proc/cpuinfo` (CPUID) but have ZMM state disabled by the hypervisor (XSAVE does not save ZMM). `__builtin_cpu_supports` correctly returns false in that case, so the SVML bridge is safe — but any auto-vectorized ZMM instruction in unguarded code still causes SIGILL. `-mprefer-vector-width=256` hard-limits auto-vectorization to 256-bit; explicit `__attribute__((target("avx512f")))` functions and runtime-guarded intrinsics are unaffected. | SIGILL at test startup on cloud VMs (e.g. GitHub Actions azure runners) where ZMM state is not enabled by the hypervisor. |
 | `-ldl` | `dlsym` / `dlopen` are used at startup to locate numpy's `_multiarray_umath.so` and resolve `npy_exp`, `__svml_exp8`, etc. | Link error: `undefined reference to 'dlsym'`. |
 
 #### Recommended (defensive) flags
