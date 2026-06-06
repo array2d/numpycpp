@@ -52,26 +52,9 @@ jobs:
 
       - name: Diagnose numpy symbols
         run: |
-          python - <<'PYEOF'
-import numpy, subprocess, glob, os
-print('numpy version:', numpy.__version__)
-so = None
-for d in ['core', '_core']:
-    for f in glob.glob(os.path.join(os.path.dirname(numpy.__file__), d, '_multiarray_umath*.so')):
-        so = f; break
-    if so:
-        break
-print('numpy so:', so)
-if so:
-    r = subprocess.run(['nm', '-D', so], capture_output=True, text=True)
-    for sym in ['npy_exp', '__svml_exp8', 'npy_log', 'cblas_sdot64_', 'cblas_sdot']:
-        found = any(sym in line for line in r.stdout.splitlines())
-        status = 'found' if found else 'NOT found'
-        print('  ' + sym + ': ' + status)
-PYEOF
-          grep -q avx512f /proc/cpuinfo \
-            && echo "AVX-512: present in cpuinfo" \
-            || echo "AVX-512: NOT in cpuinfo"
+          python diagnose_numpy.py
+          grep -q avx512f /proc/cpuinfo && echo "AVX-512: present in cpuinfo" || echo "AVX-512: NOT in cpuinfo"
+        working-directory: tests
 
       - name: Configure
         run: cmake -S tests -B tests/build -DCMAKE_BUILD_TYPE=Release
