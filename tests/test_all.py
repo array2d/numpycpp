@@ -1063,8 +1063,12 @@ class TestEinsumIjJkToIk:
     def test_vs_matmul(self, cpp, dtype):
         a = random_array((4, 5), seed=1, dtype=dtype)
         b = random_array((5, 3), seed=2, dtype=dtype)
-        assert_bit_aligned(np.asarray(cpp.einsum("ij,jk->ik", a, b)), a @ b,
-                           "ij,jk->ik vs matmul")
+        # Compare vs np.einsum (same SSE forward mul+add path as our implementation).
+        # np.einsum and np.matmul use different BLAS paths and can differ at machine
+        # epsilon — the bit-exact contract is with np.einsum, not with matmul.
+        assert_bit_aligned(np.asarray(cpp.einsum("ij,jk->ik", a, b)),
+                           np.einsum("ij,jk->ik", a, b),
+                           "ij,jk->ik vs np.einsum")
 
 
 class TestEinsumBijBjkToBik:
@@ -1086,8 +1090,12 @@ class TestEinsumBijBjkToBik:
     def test_vs_batch_matmul(self, cpp, dtype):
         a = random_array((4, 5, 6), seed=1, dtype=dtype)
         b = random_array((4, 6, 3), seed=2, dtype=dtype)
-        assert_bit_aligned(np.asarray(cpp.einsum("bij,bjk->bik", a, b)), a @ b,
-                           "bij,bjk->bik vs batch matmul")
+        # Compare vs np.einsum (same SSE forward mul+add path as our implementation).
+        # np.einsum and np.matmul use different BLAS paths and can differ at machine
+        # epsilon — the bit-exact contract is with np.einsum, not with batched matmul.
+        assert_bit_aligned(np.asarray(cpp.einsum("bij,bjk->bik", a, b)),
+                           np.einsum("bij,bjk->bik", a, b),
+                           "bij,bjk->bik vs np.einsum")
 
 
 class TestEinsumAijAijToAi:
