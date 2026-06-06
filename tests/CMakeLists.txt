@@ -39,8 +39,8 @@ endif()
 # Eigen3 (optional — used for norm/std helpers in module.cpp)
 find_package(Eigen3 CONFIG QUIET)
 
-# OpenMP
-find_package(OpenMP REQUIRED)
+# OpenMP (optional — einsum uses #pragma omp only when _OPENMP is defined)
+find_package(OpenMP)
 
 # ---- Python extension module -------------------------------------------------
 pybind11_add_module(numpycpp MODULE module.cpp)
@@ -68,7 +68,10 @@ target_compile_options(numpycpp PRIVATE
     -fno-builtin-cbrt  -fno-builtin-expm1 -fno-builtin-log1p
 )
 
-target_link_libraries(numpycpp PRIVATE OpenMP::OpenMP_CXX dl)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(numpycpp PRIVATE OpenMP::OpenMP_CXX)
+endif()
+target_link_libraries(numpycpp PRIVATE dl)
 
 # Place .so next to the test scripts for easy import
 set_target_properties(numpycpp PROPERTIES

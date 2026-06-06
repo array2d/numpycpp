@@ -46,7 +46,9 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y libeigen3-dev libgomp1 libgomp1-dev
+          sudo apt-get install -y libeigen3-dev
+          # libgomp1 (OpenMP runtime) and omp.h (OpenMP headers) are bundled
+          # with GCC on Ubuntu 24.04 — no separate libgomp1-dev package exists
 
       - name: Verify AVX-512 support
         run: |
