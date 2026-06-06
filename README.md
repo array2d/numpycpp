@@ -1,8 +1,10 @@
 # numpycpp
 
+[![CI](https://github.com/array2d/numpycpp/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/numpycpp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 [![CMake](https://img.shields.io/badge/CMake-%3E%3D3.16-green.svg)](https://cmake.org/)
+[![Tests](https://img.shields.io/badge/tests-792%20bit--exact-brightgreen.svg)](tests/test_all.py)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ## Background

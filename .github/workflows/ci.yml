@@ -1,49 +1,68 @@
+# Bit-exact CI: every push/PR must pass all 792 IEEE-754 tests.
+#
+# Requirements driving the setup:
+#   - numpy must be pip-installed (its bundled OpenBLAS exposes sdot_64_ /
+#     cblas_sgemm64_ / __svml_exp8 etc. that numpycpp resolves via dlsym)
+#   - AVX-512 hardware is required at runtime (-mavx512f compile flag +
+#     __attribute__((target)) guards; GitHub ubuntu-latest uses Intel Xeon
+#     which supports AVX-512)
+#   - pybind11, Eigen3, OpenMP needed to build the test extension module
+
 name: CI
 
 on:
   push:
-    branches: [master]
-    tags: ['v*']
+    branches: [ master, bit-exact ]
   pull_request:
-    branches: [master]
+    branches: [ master ]
 
 jobs:
-  # ---- Test: build module + run 500 precision tests --------------------------
   test:
-    runs-on: ubuntu-22.04
+    name: bit-exact tests — Python ${{ matrix.python }} / ${{ matrix.compiler }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.10"
+            compiler: g++
+          - python: "3.11"
+            compiler: g++
+          - python: "3.12"
+            compiler: g++
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3 python3-pip python3-dev libeigen3-dev
-          pip3 install pybind11 numpy pytest
-
-      - name: Build test module
-        run: make -C tests
-
-      - name: Run tests
-        run: make -C tests test
-
-  # ---- Release: build .deb and publish on tag -------------------------------
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build .deb
-        run: |
-          mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
-          make deb
-
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
         with:
-          files: build/numpycpp-dev-*.deb
-          generate_release_notes: true
+          python-version: ${{ matrix.python }}
+
+      - name: Install Python dependencies
+        run: pip install "numpy>=1.23" pybind11 pytest cmake
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libeigen3-dev libgomp1 libgomp1-dev
+
+      - name: Verify AVX-512 support
+        run: |
+          grep -q avx512f /proc/cpuinfo \
+            && echo "✓ AVX-512 supported" \
+            || (echo "✗ AVX-512 not detected — tests may SIGILL"; exit 1)
+
+      - name: Configure
+        run: cmake -S tests -B tests/build -DCMAKE_BUILD_TYPE=Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CXX: ${{ matrix.compiler }}
+
+      - name: Build
+        run: cmake --build tests/build -j$(nproc)
+
+      - name: Run bit-exact tests
+        run: |
+          cd tests
+          python -m pytest test_all.py -q --tb=short --no-header
