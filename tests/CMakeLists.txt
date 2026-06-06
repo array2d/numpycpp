@@ -53,6 +53,23 @@ find_package(Eigen3 CONFIG QUIET)
 # OpenMP (optional — einsum uses #pragma omp only when _OPENMP is defined)
 find_package(OpenMP)
 
+# AVX-512 runtime probe — compile AND run a tiny binary that executes a ZMM
+# instruction.  check_cxx_source_runs returns TRUE only if the binary exits 0,
+# so it correctly distinguishes machines where CPUID says avx512f but the
+# hypervisor traps ZMM execution (e.g. some Azure VM SKUs used by GitHub Actions).
+include(CheckCXXSourceRuns)
+set(CMAKE_REQUIRED_FLAGS "-mavx512f -mfma")
+check_cxx_source_runs("
+    #include <immintrin.h>
+    int main() {
+        __m512d a = _mm512_set1_pd(2.0);
+        __m512d b = _mm512_sqrt_pd(a);
+        (void)b;
+        return 0;
+    }
+" NUMPYCPP_AVX512_WORKS)
+unset(CMAKE_REQUIRED_FLAGS)
+
 # ---- Python extension module -------------------------------------------------
 pybind11_add_module(numpycpp MODULE module.cpp)
 
@@ -69,12 +86,7 @@ endif()
 target_compile_options(numpycpp PRIVATE
     -O2
     -ffp-contract=off          # no implicit FMA for a+b*c (keeps Cody-Waite exact)
-    -msse4.1 -mavx512f -mfma  # -mavx512f needed to compile AVX-512 intrinsics
-    -mprefer-vector-width=256  # prevent auto-vectorizer from emitting 512-bit (ZMM)
-                               # instructions globally; Azure VMs expose avx512f in
-                               # cpuinfo but may have ZMM state disabled by hypervisor
-                               # → explicit __attribute__((target("avx512f"))) + runtime
-                               # __builtin_cpu_supports guard handles AVX-512 safely
+    -msse4.1 -mfma             # baseline SSE4.1 + FMA
     # disable builtin replacements so our calls go through SVML/npy_math paths
     -fno-builtin-exp   -fno-builtin-log   -fno-builtin-sin
     -fno-builtin-cos   -fno-builtin-tan   -fno-builtin-pow
@@ -83,6 +95,16 @@ target_compile_options(numpycpp PRIVATE
     -fno-builtin-atan  -fno-builtin-exp2
     -fno-builtin-cbrt  -fno-builtin-expm1 -fno-builtin-log1p
 )
+if(NUMPYCPP_AVX512_WORKS)
+    # AVX-512 is actually executable (not just advertised in CPUID).
+    # Enable SVML vector path + wide AVX-512 loops — these are the same
+    # paths numpy uses, giving bit-exact results.
+    target_compile_options(numpycpp PRIVATE
+        -mavx512f -mprefer-vector-width=256)
+    message(STATUS "AVX-512: usable — SVML + wide-loop path enabled")
+else()
+    message(STATUS "AVX-512: not usable (missing or hypervisor-trapped) — scalar npy_* path (still bit-exact)")
+endif()
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(numpycpp PRIVATE OpenMP::OpenMP_CXX)

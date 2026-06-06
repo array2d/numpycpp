@@ -261,31 +261,42 @@ inline float atan2_npy_f32(float y, float x) {
 #undef NUMPY_NPY_F32
 
 // ============================================================================
-// Dispatchers — select SVML (AVX-512) or npy_* (scalar) at runtime
+// Dispatchers — select SVML (AVX-512) or npy_* (scalar) at runtime.
+//
+// SVML call sites are guarded by #ifdef __AVX512F__ so the dispatchers
+// compile cleanly when -mavx512f is absent (e.g. cloud CI runners where
+// CPUID reports avx512f but the hypervisor traps ZMM execution).
+// Without -mavx512f: always use the scalar npy_* path — still bit-exact.
 // ============================================================================
 
+#ifdef __AVX512F__
 #define DISPATCH_F64(name)                                              \
     inline double name##_f64(double x) {                                 \
-        if (cpu_has_avx512f()) {                                         \
-            return name##_svml_f64(x);                                   \
-        }                                                                \
+        if (cpu_has_avx512f()) return name##_svml_f64(x);               \
         return name##_npy_f64(x);                                        \
     }
-
 #define DISPATCH_F32(name)                                              \
     inline float name##_f32(float x) {                                   \
-        if (cpu_has_avx512f()) {                                         \
-            return name##_svml_f32(x);                                   \
-        }                                                                \
+        if (cpu_has_avx512f()) return name##_svml_f32(x);               \
         return name##_npy_f32(x);                                        \
     }
+#else
+#define DISPATCH_F64(name)                                              \
+    inline double name##_f64(double x) { return name##_npy_f64(x); }
+#define DISPATCH_F32(name)                                              \
+    inline float name##_f32(float x)  { return name##_npy_f32(x); }
+#endif
 
 DISPATCH_F64(exp)
 DISPATCH_F64(log)
 // sin_f64: custom — SVML scalar broadcast path loses signed zero (sin(-0)→+0).
 // IEEE 754 requires sin(±0) = ±0; preserve sign of zero explicitly.
 inline double sin_f64(double x) {
+#ifdef __AVX512F__
     double r = cpu_has_avx512f() ? sin_svml_f64(x) : sin_npy_f64(x);
+#else
+    double r = sin_npy_f64(x);
+#endif
     if (__builtin_expect(x == 0.0 && r == 0.0, 0)) return x;  // ±0 → ±0
     return r;
 }
@@ -326,19 +337,27 @@ inline float cos_f32(float x)  { return cos_npy_f32(x); }
 
 // pow / atan2 dispatchers
 inline double pow_f64(double x, double e) {
+#ifdef __AVX512F__
     if (cpu_has_avx512f()) return pow_svml_f64(x, e);
+#endif
     return pow_npy_f64(x, e);
 }
 inline float pow_f32(float x, float e) {
+#ifdef __AVX512F__
     if (cpu_has_avx512f()) return pow_svml_f32(x, e);
+#endif
     return pow_npy_f32(x, e);
 }
 inline double atan2_f64(double y, double x) {
+#ifdef __AVX512F__
     if (cpu_has_avx512f()) return atan2_svml_f64(y, x);
+#endif
     return atan2_npy_f64(y, x);
 }
 inline float atan2_f32(float y, float x) {
+#ifdef __AVX512F__
     if (cpu_has_avx512f()) return atan2_svml_f32(y, x);
+#endif
     return atan2_npy_f32(y, x);
 }
 
