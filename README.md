@@ -184,41 +184,47 @@ target_compile_options(<target> PRIVATE
 
 ### Alignment status
 
-The table below reflects the current bit-level parity between `numpycpp` C++ and Python numpy.
-All 900 tests pass under strict IEEE 754 bit comparison (float64 + float32).
+Two backends, same API — choose with `cmake -DNUMPYCPP_STD_ONLY=ON/OFF`.
 
-✅ = bit-exact on ALL architectures (SVML bridge with runtime CPU dispatch).
+| Legend | Meaning |
+|--------|---------|
+| ✅ | IEEE 754 bit-identical to numpy (float64 + float32) |
+| 〜 | Correct result, 0–2 ULP from numpy (not bit-exact) |
 
-| API group         | float64 | float32 | Notes |
-|-------------------|:-------:|:-------:|-------|
-| Creation          | ✅ | ✅ | zeros_like, ones_like, full_like, zeros, ones |
-| Astype            | ✅ | ✅ | astype int/bool, truncate float32 |
-| Comparison        | ✅ | ✅ | greater, less, equal, not_equal, etc. |
-| Logical           | ✅ | ✅ | bool-only (and/or/not/xor) |
-| Special values    | ✅ | ✅ | isnan, isinf, isfinite |
-| Manipulation      | ✅ | ✅ | diff, stack, concatenate, transpose, slice, roll, flip, repeat, tile, where |
-| **Advanced indexing** | ✅ | ✅ | take (any axis), compress (bool mask gather), nd_slice (step/reverse), put, boolean_assign, nd_slice_assign |
-| Sorting           | ✅ | ✅ | argsort, argmax, argmin |
-| Setops / interp   | ✅ | ✅ | isin, intersect1d, interp, safe_divide |
-| Access / convert  | ✅ | ✅ | array_get, asarray, to_vector |
-| **Math — element-wise** (sqrt, abs, sign, clip, round, floor, ceil, degrees, radians) | ✅ | ✅ | Pure C++, no libm dependency |
-| **Math — transcendental** (exp, log, sin, cos, tan, asin, acos, atan, log10, log2, exp2, cbrt, expm1, log1p) | ✅ | ✅ | dlsym npy_* or SVML via bridge, bit-exact on all archs |
-| **Math — power**   | ✅ | ✅ | npy_pow / npy_powf via SVML bridge |
-| **Math — hypot**   | ✅ | ✅ | std::hypot — bit-exact (numpy matches libm) |
-| **Math — atan2**   | ✅ | ✅ | npy_atan2 / npy_atan2f via SVML bridge |
-| **Reduction** (sum, mean, max, min, any, all) | ✅ | ✅ | pairwise_sum matches numpy exactly |
-| Statistical (std, var) | ✅ | ✅ | pairwise_sum + sqrt |
-| Binary (maximum, minimum) | ✅ | ✅ | std::max/min, deterministic |
-| **Dot product**    | ✅ | ✅ | BLAS (`cblas_sdot`/`cblas_ddot`) — matches `np.dot` |
-| **Norm**           | ✅ | ✅ | BLAS dot + sqrt — matches `np.linalg.norm` |
-| **Norm (axis)**    | ✅ | ✅ | BLAS dot per fiber + sqrt |
-| **Einsum**         | ✅ | ✅ | All patterns (ij,ij→i, ij,jk→ik, bij,bjk→bik, etc.) |
+| Category | Functions | `bitexact` (`STD_ONLY=OFF`) | `std` (`STD_ONLY=ON`) |
+|----------|-----------|:---------------------------:|:---------------------:|
+| **Creation** | `zeros_like` `ones_like` `full_like` `empty_like` `zeros` `ones` `full` | ✅ | ✅ |
+| **Type conversion** | `astype` (int/float/bool/int64) `truncate_to_float32` | ✅ | ✅ |
+| **Comparison** | `greater` `less` `equal` `not_equal` `greater_equal` `less_equal` | ✅ | ✅ |
+| **Logical** | `logical_and` `logical_or` `logical_not` `logical_xor` | ✅ | ✅ |
+| **Special values** | `isnan` `isinf` `isfinite` | ✅ | ✅ |
+| **Manipulation** | `diff` `stack` `vstack` `hstack` `concatenate` `transpose` `flatten` `squeeze` `roll` `flip` `repeat` `tile` `where` | ✅ | ✅ |
+| **Advanced indexing** | `take` `compress` `slice` (N-D + step) `put` `putmask` `slice_assign` | ✅ | ✅ |
+| **Sorting** | `argsort` `argmax` `argmin` | ✅ | ✅ |
+| **Set / interp** | `isin` `intersect1d` `interp` `unwrap` `flatnonzero` `safe_divide` | ✅ | ✅ |
+| **Reduction** | `sum` `mean` `max` `min` `any` `all` `std` `var` `cumsum` `mean` (axis) | ✅ | ✅ |
+| **Math — pure C++** | `sqrt` `abs` `sign` `clip` `round` `floor` `ceil` `degrees` `radians` `maximum` `minimum` | ✅ | ✅ |
+| **Math — transcendental** | `exp` `log` `sin` `cos` `tan` `arcsin` `arccos` `arctan` `log10` `log2` `exp2` `cbrt` `expm1` `log1p` | ✅ | 〜 0–1 ULP |
+| **Math — power / atan2** | `power` `arctan2` | ✅ | 〜 0–1 ULP |
+| **Math — hypot** | `hypot` | ✅ | ✅ |
+| **Dot product** | `numpy.dot` (1-D) | ✅ | 〜 0–1 ULP |
+| **Norm** | `numpy.linalg.norm` (scalar + axis) | ✅ | 〜 0–1 ULP |
+| **Matmul** | `numpy.matmul` (2-D, 1-D×2-D, 2-D×1-D, batched 3-D) | ✅ | 〜 0–2 ULP |
+| **Einsum** | `ij,ij→i` `ij,jk→ik` `bij,bjk→bik` and all 2-operand patterns | ✅ | 〜 0–2 ULP |
 
-> **SVML bridge**: At runtime, `numpycpp` detects CPU features (`__builtin_cpu_supports("avx512f")`) and selects the same math path numpy uses — AVX‑512 SVML vector functions (`__svml_exp8`, etc.) on supported hardware, or scalar `npy_exp`/`npy_log`/etc. otherwise. Both are resolved from the loaded `_multiarray_umath.so` via `dlsym`. AVX‑512 intrinsics are isolated behind `__attribute__((target("avx512f")))` — the binary compiles and runs safely on ANY x86_64 CPU without SIGILL.
+> **bitexact backend**: transcendentals resolved via `dlsym` from numpy's
+> `_multiarray_umath.so` — same `npy_exp`/`npy_log` kernels numpy uses, with
+> AVX‑512 SVML vector path (`__svml_exp8` etc.) when available.
+> Dot/matmul/einsum use OpenBLAS ILP64 (`cblas_sgemm64_`) — the same BLAS
+> numpy delegates to. Results are IEEE 754 bit-identical on **all architectures**.
 >
-> **Reductions**: All reductions use numpy's pairwise summation algorithm (recursive split, 8-accumulator unrolled). This matches `np.sum` exactly.
+> **std backend**: transcendentals use `std::exp`/`std::sin`/… from `<cmath>`
+> (glibc, typically 0–1 ULP). Dot/matmul/einsum use plain C++ loops
+> (compiler auto-vectorises with `-O3 -march=native`). No external dependencies.
 >
-> **Dot / Norm / Einsum**: Use BLAS (`cblas_sdot`, `cblas_sgemv`, `cblas_sgemm`) — the same kernels numpy delegates to — so results are bit-identical.
+> **Reductions** (both backends): pairwise summation algorithm (recursive split,
+> 8-accumulator unrolled) — matches `np.sum` exactly.
+> **hypot** (both backends): `std::hypot` — numpy delegates to the same libm call.
 
 ## Project Structure
 
