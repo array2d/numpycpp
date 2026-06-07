@@ -9,9 +9,9 @@
 #     Same API, pure <cmath> + C++ loops. Tests run with atol/rtol tolerance.
 #     No external math dependencies.
 #
-# DEB packaging:
-#   cmake -DNUMPYCPP_STD_ONLY=OFF → numpycpp-dev-bitexact-*.deb
-#   cmake -DNUMPYCPP_STD_ONLY=ON  → numpycpp-dev-std-*.deb
+# DEB packaging (flavor appears after version number in filename):
+#   cmake -DNUMPYCPP_STD_ONLY=OFF → numpycpp-dev-<ver>-bitexact-Linux.deb
+#   cmake -DNUMPYCPP_STD_ONLY=ON  → numpycpp-dev-<ver>-std-Linux.deb
 
 name: CI
 
@@ -123,13 +123,13 @@ jobs:
         run: |
           cmake -S . -B build_bitexact -DNUMPYCPP_STD_ONLY=OFF
           cmake --build build_bitexact --target deb
-          ls build_bitexact/*.deb
+          ls build_bitexact/numpycpp-dev-*-bitexact-*.deb
 
       - name: Build std DEB
         run: |
           cmake -S . -B build_std_deb -DNUMPYCPP_STD_ONLY=ON
           cmake --build build_std_deb --target deb
-          ls build_std_deb/*.deb
+          ls build_std_deb/numpycpp-dev-*-std-*.deb
 
       - name: Upload DEBs as artifacts
         uses: actions/upload-artifact@v4

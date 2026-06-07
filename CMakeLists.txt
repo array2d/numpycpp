@@ -79,9 +79,11 @@ install(DIRECTORY example/
 )
 
 # ---- CPack DEB packaging ----------------------------------------------------
-# Package name and description differ by backend:
-#   bitexact: numpycpp-dev-bitexact-<ver>-Linux.deb
-#   std:      numpycpp-dev-std-<ver>-Linux.deb
+# Package name and file name differ by backend flavor.
+# File naming: numpycpp-dev-<version>-<flavor>-Linux.deb
+#   bitexact: numpycpp-dev-1.21.2-bitexact-Linux.deb
+#   std:      numpycpp-dev-1.21.2-std-Linux.deb
+# Package name keeps the flavor so both DEBs can coexist on the same machine.
 if(NUMPYCPP_STD_ONLY)
     set(_NUMPYCPP_DEB_FLAVOR     "std")
     set(_NUMPYCPP_DEB_SUMMARY    "C++ numpy-API header-only library — pure std backend (perf-first)")
@@ -101,7 +103,7 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER        "miaobyte")
 set(CPACK_DEBIAN_PACKAGE_SECTION           "libdevel")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY          "optional")
 set(CPACK_DEBIAN_FILE_NAME
-    "numpycpp-dev-${_NUMPYCPP_DEB_FLAVOR}-${CPACK_PACKAGE_VERSION}-Linux.deb")
+    "numpycpp-dev-${CPACK_PACKAGE_VERSION}-${_NUMPYCPP_DEB_FLAVOR}-Linux.deb")
 set(CPACK_PACKAGING_INSTALL_PREFIX         "/usr")
 # Wipe the old include tree on install/upgrade so stale headers cannot accumulate.
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/preinst")

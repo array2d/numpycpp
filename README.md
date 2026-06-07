@@ -130,7 +130,7 @@ cmake -DNUMPYCPP_STD_ONLY=ON  ..   # std / performance-first backend
 | **Dot / matmul** | OpenBLAS ILP64 via `dlsym` | Pure C++ loops (auto-vectorised) |
 | **Precision vs numpy** | **IEEE 754 bit-identical** | 0–2 ULP (not bit-exact) |
 | **External deps** | libdl + numpy `.so` loaded | **None** — pure C++17 |
-| **DEB package** | `numpycpp-dev-bitexact-*.deb` | `numpycpp-dev-std-*.deb` |
+| **DEB package** | `numpycpp-dev-<ver>-bitexact-Linux.deb` | `numpycpp-dev-<ver>-std-Linux.deb` |
 | **cmake propagation** | `target_link_libraries(… dl)` | `target_compile_definitions(… NUMPYCPP_STD_ONLY)` |
 
 #### Compiler flags — bitexact backend (`NUMPYCPP_STD_ONLY=OFF`)
