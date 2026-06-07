@@ -797,6 +797,230 @@ inline ptrdiff_t argmin(const T* data, size_t n) {
 }
 
 // ============================================================================
+// Advanced / Fancy indexing
+// ============================================================================
+
+/// Compute the number of elements produced by a slice(start, stop, step).
+/// Pre-condition: step != 0, and start/stop are already normalized
+/// (integers, with -1 allowed as the "before index 0" sentinel for negative step).
+///
+/// Matches Python's len(range(start, stop, step)) exactly:
+///   • step > 0: ceil((stop - start) / step) = max(0, (stop-start+step-1)/step)
+///   • step < 0: ceil((start - stop) / -step) = max(0, (start-stop-step-1)/(-step))
+///
+/// Example: slice(9, -1, -1).indices(10) → start=9, stop=-1, step=-1 → 10 elements
+inline ptrdiff_t slice_len(ptrdiff_t start, ptrdiff_t stop, ptrdiff_t step) noexcept {
+    if (step > 0) {
+        return (stop > start) ? (stop - start + step - 1) / step : 0;
+    } else {
+        return (start > stop) ? (start - stop - step - 1) / (-step) : 0;
+    }
+}
+
+/// numpy.take(a, indices, axis=None)
+/// axis = -1 means axis=None (gather from flattened array).
+/// Indices may be negative; they are wrapped around the axis dimension size.
+///
+/// For axis ≥ 0 the output shape is:
+///   shape[:axis] + (ni,) + shape[axis+1:]
+/// For axis = -1 (None) the output is flat with shape (ni,).
+template<typename T>
+inline void take(const T* src, T* dst,
+                 const ptrdiff_t* shape, int ndim, int axis,
+                 const ptrdiff_t* indices, size_t ni) {
+    if (ni == 0) return;
+
+    if (axis < 0) {
+        // axis=None: treat src as flat, gather by flat indices
+        ptrdiff_t total = 1;
+        for (int d = 0; d < ndim; ++d) total *= shape[d];
+        for (size_t k = 0; k < ni; ++k) {
+            ptrdiff_t idx = indices[k];
+            if (idx < 0) idx += total;
+            dst[k] = src[idx];
+        }
+        return;
+    }
+
+    // axis in [0, ndim)
+    ptrdiff_t leading = 1;
+    for (int d = 0; d < axis; ++d) leading *= shape[d];
+    ptrdiff_t axis_size = shape[axis];
+    ptrdiff_t trailing = 1;
+    for (int d = axis + 1; d < ndim; ++d) trailing *= shape[d];
+
+    for (ptrdiff_t l = 0; l < leading; ++l) {
+        const T* src_l = src + l * axis_size * trailing;
+        T*       dst_l = dst + l * static_cast<ptrdiff_t>(ni) * trailing;
+        for (size_t k = 0; k < ni; ++k) {
+            ptrdiff_t idx = indices[k];
+            if (idx < 0) idx += axis_size;
+            std::memcpy(dst_l + static_cast<ptrdiff_t>(k) * trailing,
+                        src_l + idx * trailing,
+                        static_cast<size_t>(trailing) * sizeof(T));
+        }
+    }
+}
+
+/// numpy.compress(condition, a, axis=None)
+/// Gathers elements from src (treated as flat) where mask[i] == true.
+/// Returns the count of elements written to dst.
+template<typename T>
+inline size_t compress(const T* src, T* dst, const bool* mask, size_t n) {
+    size_t cnt = 0;
+    for (size_t i = 0; i < n; ++i)
+        if (mask[i]) dst[cnt++] = src[i];
+    return cnt;
+}
+
+/// N-D slice with per-dimension start/stop/step (pre-normalized by caller;
+/// stop=-1 is the valid "before index 0" sentinel for negative-step slices).
+///
+/// Output shape[d] = slice_len(starts[d], stops[d], steps[d]).
+/// dst must be pre-allocated to product(output_shape) elements.
+///
+/// Overload of numpy::slice() that accepts per-dimension step vectors.
+/// Covers  a[s0:e0:k0, s1:e1:k1, ...]  for arbitrary N-D arrays.
+template<typename T>
+inline void slice(const T* src, T* dst,
+                  const ptrdiff_t* shape, int ndim,
+                  const ptrdiff_t* starts, const ptrdiff_t* stops,
+                  const ptrdiff_t* steps) {
+    if (ndim == 0) return;
+
+    // Compute output shape
+    std::vector<ptrdiff_t> out_shape(ndim);
+    ptrdiff_t total = 1;
+    for (int d = 0; d < ndim; ++d) {
+        out_shape[d] = slice_len(starts[d], stops[d], steps[d]);
+        if (out_shape[d] <= 0) return;  // empty slice
+        total *= out_shape[d];
+    }
+
+    // Input strides (C-contiguous)
+    std::vector<ptrdiff_t> in_stride(ndim);
+    in_stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        in_stride[d] = in_stride[d + 1] * shape[d + 1];
+
+    // Iterate output in C-order, compute source flat index from multi-index
+    for (ptrdiff_t out_idx = 0; out_idx < total; ++out_idx) {
+        ptrdiff_t rem = out_idx;
+        ptrdiff_t in_idx = 0;
+        for (int d = ndim - 1; d >= 0; --d) {
+            ptrdiff_t od = rem % out_shape[d];
+            rem /= out_shape[d];
+            in_idx += (starts[d] + od * steps[d]) * in_stride[d];
+        }
+        dst[out_idx] = src[in_idx];
+    }
+}
+
+/// N-D slice assignment with scalar: dst[slice] = value (in-place).
+/// Overload of slice_assign() that accepts per-dimension step vectors.
+/// starts/stops/steps are pre-normalized (same convention as slice()).
+template<typename T>
+inline void slice_assign(T* dst,
+                          const ptrdiff_t* shape, int ndim,
+                          const ptrdiff_t* starts, const ptrdiff_t* stops,
+                          const ptrdiff_t* steps, T value) {
+    if (ndim == 0) return;
+
+    std::vector<ptrdiff_t> out_shape(ndim);
+    ptrdiff_t total = 1;
+    for (int d = 0; d < ndim; ++d) {
+        out_shape[d] = slice_len(starts[d], stops[d], steps[d]);
+        if (out_shape[d] <= 0) return;
+        total *= out_shape[d];
+    }
+
+    std::vector<ptrdiff_t> in_stride(ndim);
+    in_stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        in_stride[d] = in_stride[d + 1] * shape[d + 1];
+
+    for (ptrdiff_t out_idx = 0; out_idx < total; ++out_idx) {
+        ptrdiff_t rem = out_idx;
+        ptrdiff_t in_idx = 0;
+        for (int d = ndim - 1; d >= 0; --d) {
+            ptrdiff_t od = rem % out_shape[d];
+            rem /= out_shape[d];
+            in_idx += (starts[d] + od * steps[d]) * in_stride[d];
+        }
+        dst[in_idx] = value;
+    }
+}
+
+/// N-D slice assignment with array: dst[slice] = values (in-place).
+/// Overload of slice_assign() with an array of values (one per slice element).
+/// values must contain exactly product(output_shape) elements in C-order.
+template<typename T>
+inline void slice_assign(T* dst,
+                          const ptrdiff_t* shape, int ndim,
+                          const ptrdiff_t* starts, const ptrdiff_t* stops,
+                          const ptrdiff_t* steps, const T* values) {
+    if (ndim == 0) return;
+
+    std::vector<ptrdiff_t> out_shape(ndim);
+    ptrdiff_t total = 1;
+    for (int d = 0; d < ndim; ++d) {
+        out_shape[d] = slice_len(starts[d], stops[d], steps[d]);
+        if (out_shape[d] <= 0) return;
+        total *= out_shape[d];
+    }
+
+    std::vector<ptrdiff_t> in_stride(ndim);
+    in_stride[ndim - 1] = 1;
+    for (int d = ndim - 2; d >= 0; --d)
+        in_stride[d] = in_stride[d + 1] * shape[d + 1];
+
+    for (ptrdiff_t out_idx = 0; out_idx < total; ++out_idx) {
+        ptrdiff_t rem = out_idx;
+        ptrdiff_t in_idx = 0;
+        for (int d = ndim - 1; d >= 0; --d) {
+            ptrdiff_t od = rem % out_shape[d];
+            rem /= out_shape[d];
+            in_idx += (starts[d] + od * steps[d]) * in_stride[d];
+        }
+        dst[in_idx] = values[out_idx];
+    }
+}
+
+/// numpy.put(a, indices, values, mode='raise')
+/// Scatters values into dst (flat) at the given indices.
+/// Negative indices are wrapped: idx < 0 → idx += n.
+/// Out-of-range indices are silently skipped (clip mode).
+template<typename T>
+inline void put(T* dst, size_t n,
+                const ptrdiff_t* indices, const T* values, size_t ni) {
+    for (size_t k = 0; k < ni; ++k) {
+        ptrdiff_t idx = indices[k];
+        if (idx < 0) idx += static_cast<ptrdiff_t>(n);
+        if (idx >= 0 && idx < static_cast<ptrdiff_t>(n))
+            dst[static_cast<size_t>(idx)] = values[k];
+    }
+}
+
+/// numpy.putmask(a, mask, values) — scalar variant.
+/// Sets dst[i] = value for every i where mask[i] is true.
+/// Equivalent to Python: a[mask] = scalar
+template<typename T>
+inline void putmask(T* dst, const bool* mask, size_t n, T value) {
+    for (size_t i = 0; i < n; ++i)
+        if (mask[i]) dst[i] = value;
+}
+
+/// numpy.putmask(a, mask, values) — array variant.
+/// Sets dst[i] = values[j++] for every i where mask[i] is true (sequential).
+/// Equivalent to Python: a[mask] = array_of_values
+template<typename T>
+inline void putmask(T* dst, const bool* mask, size_t n, const T* values) {
+    size_t j = 0;
+    for (size_t i = 0; i < n; ++i)
+        if (mask[i]) dst[i] = values[j++];
+}
+
+// ============================================================================
 // Set operations
 // ============================================================================
 

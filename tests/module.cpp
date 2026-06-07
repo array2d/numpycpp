@@ -241,6 +241,110 @@ PYBIND11_MODULE(numpycpp, m) {
     // -- Safe division -----------------------------------------------------
     m.def("safe_divide", &numpy::safe_divide, py::arg("a"), py::arg("b"), py::arg("default_val") = 0.0);
 
+    // -- Advanced / Fancy indexing -----------------------------------------
+    // numpy.take(a, indices, axis=None)
+    m.def("take",
+          static_cast<py::array_t<double>(*)(
+              const py::array_t<double>&,
+              const py::array_t<py::ssize_t>&, int)>(&numpy::take),
+          py::arg("arr"), py::arg("indices"), py::arg("axis") = -1);
+    m.def("take",
+          static_cast<py::array_t<float>(*)(
+              const py::array_t<float>&,
+              const py::array_t<py::ssize_t>&, int)>(&numpy::take),
+          py::arg("arr"), py::arg("indices"), py::arg("axis") = -1);
+
+    // numpy.compress(condition, a) — boolean mask gather
+    m.def("compress",
+          static_cast<py::array_t<double>(*)(
+              const py::array_t<double>&,
+              const py::array_t<bool>&)>(&numpy::compress));
+    m.def("compress",
+          static_cast<py::array_t<float>(*)(
+              const py::array_t<float>&,
+              const py::array_t<bool>&)>(&numpy::compress));
+
+    // slice(a, starts, stops, steps) — N-D overload of existing slice()
+    m.def("slice",
+          static_cast<py::array_t<double>(*)(
+              const py::array_t<double>&,
+              const std::vector<py::ssize_t>&,
+              const std::vector<py::ssize_t>&,
+              const std::vector<py::ssize_t>&)>(&numpy::slice));
+    m.def("slice",
+          static_cast<py::array_t<float>(*)(
+              const py::array_t<float>&,
+              const std::vector<py::ssize_t>&,
+              const std::vector<py::ssize_t>&,
+              const std::vector<py::ssize_t>&)>(&numpy::slice));
+
+    // numpy.put(a, indices, values) — in-place scatter
+    m.def("put",
+          static_cast<void(*)(
+              py::array_t<double>,
+              const py::array_t<py::ssize_t>&,
+              const py::array_t<double>&)>(&numpy::put));
+    m.def("put",
+          static_cast<void(*)(
+              py::array_t<float>,
+              const py::array_t<py::ssize_t>&,
+              const py::array_t<float>&)>(&numpy::put));
+
+    // numpy.putmask(a, mask, scalar) — in-place  a[mask] = scalar
+    // NOTE: float BEFORE double — pybind11 forcecast would silently upcast
+    // a float32 array to a float64 temporary copy and modify that copy instead
+    // of the original array.  Registering the narrower type first avoids this.
+    m.def("putmask",
+          static_cast<void(*)(py::array_t<float>,
+                               const py::array_t<bool>&, float)>(
+              &numpy::putmask));
+    m.def("putmask",
+          static_cast<void(*)(py::array_t<double>,
+                               const py::array_t<bool>&, double)>(
+              &numpy::putmask));
+
+    // numpy.putmask(a, mask, values) — in-place  a[mask] = array (float first)
+    m.def("putmask",
+          static_cast<void(*)(py::array_t<float>,
+                               const py::array_t<bool>&,
+                               const py::array_t<float>&)>(
+              &numpy::putmask));
+    m.def("putmask",
+          static_cast<void(*)(py::array_t<double>,
+                               const py::array_t<bool>&,
+                               const py::array_t<double>&)>(
+              &numpy::putmask));
+
+    // slice_assign(a, starts, stops, steps, scalar) — N-D overload (float first)
+    m.def("slice_assign",
+          static_cast<void(*)(py::array_t<float>,
+                               const std::vector<py::ssize_t>&,
+                               const std::vector<py::ssize_t>&,
+                               const std::vector<py::ssize_t>&, float)>(
+              &numpy::slice_assign));
+    m.def("slice_assign",
+          static_cast<void(*)(py::array_t<double>,
+                               const std::vector<py::ssize_t>&,
+                               const std::vector<py::ssize_t>&,
+                               const std::vector<py::ssize_t>&, double)>(
+              &numpy::slice_assign));
+
+    // slice_assign(a, starts, stops, steps, values) — N-D array overload (float first)
+    m.def("slice_assign",
+          static_cast<void(*)(py::array_t<float>,
+                               const std::vector<py::ssize_t>&,
+                               const std::vector<py::ssize_t>&,
+                               const std::vector<py::ssize_t>&,
+                               const py::array_t<float>&)>(
+              &numpy::slice_assign));
+    m.def("slice_assign",
+          static_cast<void(*)(py::array_t<double>,
+                               const std::vector<py::ssize_t>&,
+                               const std::vector<py::ssize_t>&,
+                               const std::vector<py::ssize_t>&,
+                               const py::array_t<double>&)>(
+              &numpy::slice_assign));
+
     // -- Dot product -------------------------------------------------------
     m.def("dot", static_cast<double(*)(const py::array_t<double>&, const py::array_t<double>&)>(&numpy::dot));
     m.def("dot", static_cast<float(*)(const py::array_t<float>&, const py::array_t<float>&)>(&numpy::dot));

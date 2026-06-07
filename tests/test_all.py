@@ -1575,3 +1575,509 @@ def test_matmul_batched(dtype, batch, M, K, N, cpp):
     B = rng.randn(batch, K, N).astype(dtype)
     assert_bit_aligned(cpp.matmul(A, B), np.matmul(A, B),
                        f"matmul 3D ({batch},{M},{K})@({batch},{K},{N}) {dtype.__name__}")
+
+
+# =============================================================================
+# Section 18: Advanced / Fancy Indexing
+#   numpy.take, numpy.compress, nd_slice (slice with step), numpy.put,
+#   boolean_assign (a[mask]=val), boolean_assign_array (a[mask]=arr),
+#   nd_slice_assign (a[s:s:s]=val), nd_slice_assign_array (a[s:s:s]=arr)
+#
+# All operations must produce bit-level identical results to Python numpy.
+# Gather/scatter ops have no floating-point arithmetic, so bit-exactness is
+# trivially guaranteed — the tests confirm correct element selection & placement.
+# =============================================================================
+
+# ─── helpers ─────────────────────────────────────────────────────────────────
+
+def _si(length, start=None, stop=None, step=1):
+    """Convenience: return (start, stop, step) via slice.indices(length)."""
+    return slice(start, stop, step).indices(length)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18-A  numpy.take
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+@pytest.mark.parametrize("axis", [0, 1, 2], ids=["axis0", "axis1", "axis2"])
+def test_take_3d_axes(dtype, axis, cpp):
+    """take along every axis of a 3-D array — shape and values must match."""
+    rng = np.random.RandomState(axis * 17)
+    a = rng.randn(3, 4, 5).astype(dtype)
+    idx = np.array([0, 2], dtype=np.int64)
+    assert_bit_aligned(cpp.take(a, idx, axis), np.take(a, idx, axis=axis),
+                       f"take 3D axis={axis}")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_take_axis_none_flat(dtype, cpp):
+    """take with axis=None (default -1) gathers from the flattened array."""
+    rng = np.random.RandomState(7)
+    a = rng.randn(4, 5).astype(dtype)
+    idx = np.array([0, 6, 11, 19], dtype=np.int64)
+    assert_bit_aligned(cpp.take(a, idx), np.take(a, idx),
+                       "take axis=None")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_take_negative_indices(dtype, cpp):
+    """Negative indices in take wrap around the axis size."""
+    a = np.arange(6, dtype=dtype)
+    idx = np.array([-1, -2, -6], dtype=np.int64)
+    assert_bit_aligned(cpp.take(a, idx), np.take(a, idx),
+                       "take 1D negative indices")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_take_1d_axis0(dtype, cpp):
+    """take on a 1-D array with axis=0 is the most common fancy-index case."""
+    a = np.array([10, 20, 30, 40, 50], dtype=dtype)
+    idx = np.array([4, 0, 2, 0], dtype=np.int64)
+    assert_bit_aligned(cpp.take(a, idx, 0), np.take(a, idx, axis=0),
+                       "take 1D axis=0 with repeats")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_take_2d_axis1_cols(dtype, cpp):
+    """take selects specific columns from a 2-D matrix."""
+    rng = np.random.RandomState(42)
+    a = rng.randn(5, 7).astype(dtype)
+    idx = np.array([6, 0, 3], dtype=np.int64)
+    assert_bit_aligned(cpp.take(a, idx, 1), np.take(a, idx, axis=1),
+                       "take 2D axis=1 cols")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_take_large_random(dtype, cpp):
+    """take on a large array — ensures no off-by-one at scale."""
+    rng = np.random.RandomState(99)
+    a = rng.randn(100, 50).astype(dtype)
+    idx = np.array(list(range(0, 50, 3)) + list(range(49, 0, -7)), dtype=np.int64)
+    assert_bit_aligned(cpp.take(a, idx, 1), np.take(a, idx, axis=1),
+                       "take large 2D axis=1")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18-B  numpy.compress (boolean mask gather)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_compress_basic(dtype, cpp):
+    """compress selects elements where the boolean mask is True."""
+    a    = np.array([10, 20, 30, 40, 50], dtype=dtype)
+    mask = np.array([True, False, True, False, True])
+    assert_bit_aligned(cpp.compress(a, mask), np.compress(mask, a),
+                       "compress basic")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_compress_all_true(dtype, cpp):
+    """compress(all-True) == identity."""
+    a    = np.arange(8, dtype=dtype)
+    mask = np.ones(8, dtype=bool)
+    assert_bit_aligned(cpp.compress(a, mask), np.compress(mask, a),
+                       "compress all-true")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_compress_all_false(dtype, cpp):
+    """compress(all-False) → empty output."""
+    a    = np.arange(6, dtype=dtype)
+    mask = np.zeros(6, dtype=bool)
+    cpp_r = np.asarray(cpp.compress(a, mask))
+    np_r  = np.compress(mask, a)
+    assert cpp_r.size == np_r.size == 0, "compress all-false must be empty"
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_compress_2d_flat(dtype, cpp):
+    """compress flattens a 2-D array (axis=None) before applying the mask."""
+    rng  = np.random.RandomState(5)
+    a    = rng.randn(4, 5).astype(dtype)
+    mask = (a.ravel() > 0)
+    assert_bit_aligned(cpp.compress(a, mask), np.compress(mask, a),
+                       "compress 2D flat")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_compress_special_values(dtype, cpp):
+    """compress must pass NaN / ±Inf through unchanged."""
+    a    = np.array([np.nan, np.inf, -np.inf, 1.0, -1.0], dtype=dtype)
+    mask = np.array([True, True, True, False, True])
+    assert_bit_aligned(cpp.compress(a, mask), np.compress(mask, a),
+                       "compress NaN/Inf passthrough")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18-C  nd_slice — N-D slice with arbitrary per-dimension step
+#
+# Caller passes pre-normalised (start, stop, step) from slice.indices(n).
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+@pytest.mark.parametrize("slc,label", [
+    (slice(None, None, 2),    "::2"),
+    (slice(1, 7, 2),          "1:7:2"),
+    (slice(None, None, 3),    "::3"),
+    (slice(2, 9, 3),          "2:9:3"),
+    (slice(None, None, None), "full"),
+], ids=["step2", "1:7:2", "step3", "2:9:3", "full"])
+def test_slice_1d_pos_step(dtype, slc, label, cpp):
+    """1-D nd_slice with positive step produces bit-identical output."""
+    a = np.arange(12, dtype=dtype)
+    st, sp, sv = slc.indices(len(a))
+    assert_bit_aligned(cpp.slice(a, [st], [sp], [sv]), a[slc],
+                       f"slice 1D {label}")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+@pytest.mark.parametrize("slc,label", [
+    (slice(None, None, -1), "::-1"),
+    (slice(None, None, -2), "::-2"),
+    (slice(8, 1, -3),       "8:1:-3"),
+    (slice(6, 0, -2),       "6:0:-2"),
+], ids=["rev1", "rev2", "8:1:-3", "6:0:-2"])
+def test_slice_1d_neg_step(dtype, slc, label, cpp):
+    """1-D nd_slice with negative step (reverse / stride) matches numpy."""
+    a = np.arange(10, dtype=dtype)
+    st, sp, sv = slc.indices(len(a))
+    assert_bit_aligned(cpp.slice(a, [st], [sp], [sv]), a[slc],
+                       f"slice 1D {label}")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+@pytest.mark.parametrize("row_slc,col_slc,label", [
+    (slice(1, 3),          slice(2, 5),          "[1:3, 2:5]"),
+    (slice(None),          slice(None, None, 2), "[:, ::2]"),
+    (slice(None, None, 2), slice(None),          "[::2, :]"),
+    (slice(None, None, 2), slice(None, None, 3), "[::2, ::3]"),
+    (slice(None, None, -1),slice(None, None, -1),"[::-1, ::-1]"),
+    (slice(0, 4, 2),       slice(1, 5, 2),       "[0:4:2, 1:5:2]"),
+], ids=["1:3-2:5", ":-::2", "::2-:", "::2-::3", "rev-rev", "stride2d"])
+def test_slice_2d(dtype, row_slc, col_slc, label, cpp):
+    """2-D nd_slice with all step combinations matches numpy."""
+    rng = np.random.RandomState(hash(label) % (2**31))
+    a   = rng.randn(6, 8).astype(dtype)
+    st0, sp0, sv0 = row_slc.indices(a.shape[0])
+    st1, sp1, sv1 = col_slc.indices(a.shape[1])
+    assert_bit_aligned(
+        cpp.slice(a, [st0, st1], [sp0, sp1], [sv0, sv1]),
+        a[row_slc, col_slc],
+        f"slice 2D {label}")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_slice_3d(dtype, cpp):
+    """3-D nd_slice: a[::2, 1:4, ::3] on a (5,6,7) array."""
+    rng = np.random.RandomState(11)
+    a   = rng.randn(5, 6, 7).astype(dtype)
+    s0  = slice(None, None, 2)
+    s1  = slice(1, 4)
+    s2  = slice(None, None, 3)
+    t0, p0, v0 = s0.indices(5)
+    t1, p1, v1 = s1.indices(6)
+    t2, p2, v2 = s2.indices(7)
+    assert_bit_aligned(
+        cpp.slice(a, [t0,t1,t2], [p0,p1,p2], [v0,v1,v2]),
+        a[s0, s1, s2],
+        "slice 3D")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_slice_special_values(dtype, cpp):
+    """slice must pass NaN / ±Inf through bit-identically."""
+    a = np.array([np.nan, 1.0, np.inf, 2.0, -np.inf, 3.0], dtype=dtype)
+    slc = slice(None, None, 2)   # selects indices 0, 2, 4
+    st, sp, sv = slc.indices(len(a))
+    assert_bit_aligned(cpp.slice(a, [st], [sp], [sv]), a[slc],
+                       "slice NaN/Inf passthrough")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18-D  numpy.put (in-place scatter)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_put_basic(dtype, cpp):
+    """put writes values at specified flat indices."""
+    a   = np.zeros(8, dtype=dtype)
+    idx = np.array([0, 3, 7], dtype=np.int64)
+    val = np.array([1.0, 2.0, 3.0], dtype=dtype)
+    py_a = np.zeros(8, dtype=dtype); np.put(py_a, idx, val)
+    cpp.put(a, idx, val)
+    assert_bit_aligned(a, py_a, "put basic")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_put_negative_indices(dtype, cpp):
+    """put with negative indices: idx < 0  →  idx += n."""
+    a   = np.zeros(6, dtype=dtype)
+    idx = np.array([-1, -3, -6], dtype=np.int64)
+    val = np.array([10.0, 20.0, 30.0], dtype=dtype)
+    py_a = np.zeros(6, dtype=dtype); np.put(py_a, idx, val)
+    cpp.put(a, idx, val)
+    assert_bit_aligned(a, py_a, "put negative")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_put_overwrite(dtype, cpp):
+    """When indices repeat, the last write wins — matching numpy."""
+    a   = np.zeros(4, dtype=dtype)
+    idx = np.array([1, 1, 1], dtype=np.int64)
+    val = np.array([5.0, 6.0, 7.0], dtype=dtype)
+    py_a = np.zeros(4, dtype=dtype); np.put(py_a, idx, val)
+    cpp.put(a, idx, val)
+    assert_bit_aligned(a, py_a, "put repeat index")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_put_special_values(dtype, cpp):
+    """put must store NaN / ±Inf bit-identically."""
+    a   = np.zeros(5, dtype=dtype)
+    idx = np.array([0, 1, 2], dtype=np.int64)
+    val = np.array([np.nan, np.inf, -np.inf], dtype=dtype)
+    py_a = np.zeros(5, dtype=dtype); np.put(py_a, idx, val)
+    cpp.put(a, idx, val)
+    assert_bit_aligned(a, py_a, "put NaN/Inf")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_put_2d_flat(dtype, cpp):
+    """put into a 2-D array uses flat indexing (row-major)."""
+    a   = np.zeros((3, 4), dtype=dtype)
+    idx = np.array([0, 5, 11], dtype=np.int64)
+    val = np.array([1.0, 2.0, 3.0], dtype=dtype)
+    py_a = np.zeros((3, 4), dtype=dtype); np.put(py_a, idx, val)
+    cpp.put(a, idx, val)
+    assert_bit_aligned(a, py_a, "put 2D flat index")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18-E  boolean_assign (a[mask] = scalar  and  a[mask] = array)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_putmask_scalar_basic(dtype, cpp):
+    """a[mask] = scalar sets every True position to the given value."""
+    a    = np.arange(6, dtype=dtype)
+    mask = np.array([True, False, True, True, False, True])
+    fill = dtype(99.0)
+    py_a = a.copy(); py_a[mask] = fill
+    cpp.putmask(a, mask, fill)
+    assert_bit_aligned(a, py_a, "putmask scalar")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_putmask_scalar_nan(dtype, cpp):
+    """putmask with NaN fill must write NaN bits exactly."""
+    a    = np.zeros(5, dtype=dtype)
+    mask = np.array([True, False, True, False, True])
+    fill = dtype(np.nan)
+    py_a = a.copy(); py_a[mask] = fill
+    cpp.putmask(a, mask, fill)
+    assert_bit_aligned(a, py_a, "putmask NaN")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_putmask_scalar_all_false(dtype, cpp):
+    """putmask with all-False mask leaves the array unchanged."""
+    a    = np.arange(5, dtype=dtype)
+    mask = np.zeros(5, dtype=bool)
+    orig = a.copy()
+    cpp.putmask(a, mask, dtype(42.0))
+    assert_bit_aligned(a, orig, "putmask all-false no-op")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_putmask_scalar_all_true(dtype, cpp):
+    """putmask with all-True mask sets every element."""
+    a    = np.arange(5, dtype=dtype)
+    mask = np.ones(5, dtype=bool)
+    fill = dtype(-1.0)
+    py_a = a.copy(); py_a[mask] = fill
+    cpp.putmask(a, mask, fill)
+    assert_bit_aligned(a, py_a, "putmask all-true")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_putmask_array_basic(dtype, cpp):
+    """a[mask] = array assigns successive values to True positions."""
+    a    = np.zeros(8, dtype=dtype)
+    mask = np.array([True, False, True, True, False, True, False, True])
+    vals = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)  # 5 trues
+    py_a = a.copy(); py_a[mask] = vals
+    cpp.putmask(a, mask, vals)
+    assert_bit_aligned(a, py_a, "putmask_array basic")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_putmask_array_special(dtype, cpp):
+    """putmask_array with NaN / ±Inf values is bit-exact."""
+    a    = np.zeros(6, dtype=dtype)
+    mask = np.array([True, False, True, False, True, True])
+    vals = np.array([np.nan, np.inf, -np.inf, 0.0], dtype=dtype)
+    py_a = a.copy(); py_a[mask] = vals
+    cpp.putmask(a, mask, vals)
+    assert_bit_aligned(a, py_a, "putmask_array NaN/Inf")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_putmask_2d(dtype, cpp):
+    """putmask on 2-D array: pass the mask as a flat array.
+
+    numpy's a[mask] = val with a same-shape bool mask iterates elements flat.
+    Our C++ API also treats mask and array flat, so we flatten the mask first.
+    """
+    rng  = np.random.RandomState(42)
+    a    = rng.randn(4, 5).astype(dtype)
+    mask_2d   = a > 0                  # shape (4, 5) — same shape as a
+    flat_mask = mask_2d.ravel()        # flatten for our flat C++ API
+    fill = dtype(-999.0)
+    py_a = a.copy(); py_a[mask_2d] = fill
+    cpp.putmask(a, flat_mask, fill)
+    assert_bit_aligned(a, py_a, "putmask 2D flat mask")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18-F  nd_slice_assign — in-place slice assignment
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+@pytest.mark.parametrize("slc,label", [
+    (slice(None, None, 2), "::2"),
+    (slice(1, 8, 3),       "1:8:3"),
+    (slice(None, None, -1),"::-1"),
+    (slice(None, None, -2),"::-2"),
+], ids=["::2", "1:8:3", "::-1", "::-2"])
+def test_slice_assign_1d_scalar(dtype, slc, label, cpp):
+    """a[start:stop:step] = scalar in-place, 1-D array."""
+    n    = 10
+    a    = np.arange(n, dtype=dtype)
+    fill = dtype(77.0)
+    py_a = a.copy(); py_a[slc] = fill
+    st, sp, sv = slc.indices(n)
+    cpp.slice_assign(a, [st], [sp], [sv], fill)
+    assert_bit_aligned(a, py_a, f"slice_assign 1D scalar {label}")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_slice_assign_2d_scalar(dtype, cpp):
+    """a[::2, ::3] = scalar covers a 2-D strided slice."""
+    rng = np.random.RandomState(7)
+    a   = rng.randn(6, 9).astype(dtype)
+    s0  = slice(None, None, 2)
+    s1  = slice(None, None, 3)
+    fill = dtype(-5.0)
+    py_a = a.copy(); py_a[s0, s1] = fill
+    t0, p0, v0 = s0.indices(6)
+    t1, p1, v1 = s1.indices(9)
+    cpp.slice_assign(a, [t0, t1], [p0, p1], [v0, v1], fill)
+    assert_bit_aligned(a, py_a, "slice_assign 2D scalar")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_slice_assign_1d_array(dtype, cpp):
+    """a[::2] = array writes each value to successive selected positions."""
+    n   = 10
+    a   = np.zeros(n, dtype=dtype)
+    slc = slice(None, None, 2)    # selects 5 positions
+    vals = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
+    py_a = a.copy(); py_a[slc] = vals
+    st, sp, sv = slc.indices(n)
+    cpp.slice_assign(a, [st], [sp], [sv], vals)
+    assert_bit_aligned(a, py_a, "slice_assign 1D array")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_slice_assign_2d_array(dtype, cpp):
+    """a[1:3, 1:4] = array writes a contiguous block."""
+    rng  = np.random.RandomState(3)
+    a    = rng.randn(5, 6).astype(dtype)
+    s0   = slice(1, 3)
+    s1   = slice(1, 4)
+    vals = rng.randn(2, 3).astype(dtype)   # 2×3 = 6 values
+    py_a = a.copy(); py_a[s0, s1] = vals
+    t0, p0, v0 = s0.indices(5)
+    t1, p1, v1 = s1.indices(6)
+    cpp.slice_assign(a, [t0, t1], [p0, p1], [v0, v1],
+                              vals.ravel())   # flatten for our API
+    assert_bit_aligned(a, py_a, "slice_assign 2D array")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_slice_assign_scalar_nan(dtype, cpp):
+    """slice_assign with NaN fill writes exact NaN bits."""
+    a   = np.zeros(8, dtype=dtype)
+    slc = slice(1, 7, 2)
+    py_a = a.copy(); py_a[slc] = dtype(np.nan)
+    st, sp, sv = slc.indices(8)
+    cpp.slice_assign(a, [st], [sp], [sv], dtype(np.nan))
+    assert_bit_aligned(a, py_a, "slice_assign NaN fill")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_slice_assign_reverse_write(dtype, cpp):
+    """a[::-1] = distinct_values writes in reverse element order.
+
+    Python:   a[::-1] = [10,20,30,40,50,60]
+      sets a[5]=10, a[4]=20, ..., a[0]=60  →  a = [60,50,40,30,20,10]
+
+    C++ nd_slice_assign_array with (start=5, stop=-1, step=-1):
+      out_idx=0 → dst[5]=vals[0]=10, ..., out_idx=5 → dst[0]=vals[5]=60
+    Both produce the same result.
+    """
+    n    = 6
+    a    = np.zeros(n, dtype=dtype)
+    vals = np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0], dtype=dtype)
+    slc  = slice(None, None, -1)
+    py_a = a.copy(); py_a[slc] = vals
+    st, sp, sv = slc.indices(n)
+    cpp.slice_assign(a, [st], [sp], [sv], vals)
+    assert_bit_aligned(a, py_a, "slice_assign reverse write")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18-G  Combined / integration tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_fancy_then_slice(dtype, cpp):
+    """take + nd_slice chained — fancy-gather rows, then slice columns."""
+    rng = np.random.RandomState(21)
+    a   = rng.randn(8, 10).astype(dtype)
+    row_idx = np.array([0, 3, 7], dtype=np.int64)
+    col_slc = slice(2, 8, 2)
+    # Python: a[[0,3,7], 2:8:2]
+    py_r = a[row_idx][:, col_slc]
+    # C++: take rows, then nd_slice cols
+    cpp_rows = cpp.take(a, row_idx, 0)
+    t, p, v  = col_slc.indices(10)
+    cpp_r    = cpp.slice(cpp_rows, [0, t], [3, p], [1, v])
+    assert_bit_aligned(cpp_r, py_r, "take then nd_slice")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_compress_then_put_roundtrip(dtype, cpp):
+    """compress extracts, put writes back — round-trip is identity."""
+    rng  = np.random.RandomState(55)
+    a    = rng.randn(10).astype(dtype)
+    mask = a > 0
+    idx  = np.flatnonzero(mask).astype(np.int64)
+    vals = np.asarray(cpp.compress(a, mask))
+    out  = np.zeros(10, dtype=dtype)
+    cpp.put(out, idx, vals)
+    # out should equal a at positive positions, 0 elsewhere
+    py_out = np.zeros(10, dtype=dtype)
+    py_out[mask] = a[mask]
+    assert_bit_aligned(out, py_out, "compress→put roundtrip")
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
+def test_slice_empty_result(dtype, cpp):
+    """slice with stop <= start (positive step) must return empty array."""
+    a   = np.arange(5, dtype=dtype)
+    # slice(5, 5, 1) → empty
+    cpp_r = np.asarray(cpp.slice(a, [5], [5], [1]))
+    np_r  = a[5:5:1]
+    assert cpp_r.size == np_r.size == 0, "empty slice must produce empty array"

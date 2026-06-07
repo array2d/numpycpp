@@ -1161,4 +1161,300 @@ inline py::array_t<double> interp(const py::array_t<double>& x,
     return result;
 }
 
+// ============================================================================
+// Advanced / Fancy indexing
+// ============================================================================
+//
+// These wrappers implement the full set of numpy advanced-indexing operations.
+// All names align with the numpy function API:
+//
+//   take(a, indices, axis)       — numpy.take  : gather along an axis
+//   compress(a, mask)            — numpy.compress : boolean mask gather
+//   slice(a, starts,stops,steps) — overload of slice() with per-dim step
+//   put(a, indices, values)      — numpy.put   : in-place scatter by flat index
+//   putmask(a, mask, scalar)     — numpy.putmask (scalar):  a[mask] = scalar
+//   putmask(a, mask, values)     — numpy.putmask (array):   a[mask] = array
+//   slice_assign(a,starts,stops,steps,scalar) — overload: a[s:e:k]=scalar
+//   slice_assign(a,starts,stops,steps,values) — overload: a[s:e:k]=array
+//
+// All slice starts/stops/steps must be pre-normalized by the caller using
+// Python's slice.indices(n) convention:
+//   • step != 0
+//   • stop = -1 is the valid "before index 0" sentinel for negative-step slices
+//     (e.g. slice(None,None,-1).indices(n) → (n-1, -1, -1))
+// ============================================================================
+
+// ── Helper: normalize Python slice parameters for a single dimension ─────────
+// Mirrors the logic of PySlice_GetIndicesEx / slice.indices(length).
+// None is represented as py::ssize_t min (LLONG_MIN / 2) by convention from
+// callers; this helper is also exposed so callers can avoid that dependency.
+inline void _slice_indices(py::ssize_t length,
+                            py::ssize_t start_in,  bool start_none,
+                            py::ssize_t stop_in,   bool stop_none,
+                            py::ssize_t step,
+                            py::ssize_t& start_out, py::ssize_t& stop_out) {
+    if (step == 0) throw std::invalid_argument("slice step cannot be zero");
+
+    py::ssize_t start, stop;
+
+    if (step > 0) {
+        start = start_none ? 0      : start_in;
+        stop  = stop_none  ? length : stop_in;
+        // wrap negatives
+        if (start < 0) start += length;
+        if (stop  < 0) stop  += length;
+        // clamp
+        start = std::max(py::ssize_t(0), std::min(length,   start));
+        stop  = std::max(py::ssize_t(0), std::min(length,   stop));
+    } else {
+        start = start_none ? length - 1 : start_in;
+        stop  = stop_none  ? -(length + 1) : stop_in;   // sentinel: before idx 0
+        // wrap negatives (but NOT for stop when already a "before 0" sentinel)
+        if (start < 0) start += length;
+        if (stop  < 0 && !stop_none) stop += length;
+        // clamp
+        start = std::max(py::ssize_t(-1), std::min(length - 1, start));
+        stop  = std::max(py::ssize_t(-1), std::min(length - 1, stop));
+    }
+    start_out = start;
+    stop_out  = stop;
+}
+
+// ── numpy.take ───────────────────────────────────────────────────────────────
+
+/// numpy.take(a, indices, axis=None)
+///   axis = -1 means axis=None (gather from flattened array).
+///   indices must be int64 (np.int64 / np.intp array).
+///   Negative indices are wrapped mod axis_size.
+template<typename T>
+py::array_t<T> take(const py::array_t<T>& arr,
+                    const py::array_t<py::ssize_t>& indices,
+                    int axis = -1) {
+    auto buf  = arr.request();
+    auto ibuf = indices.request();
+    int ndim = static_cast<int>(buf.ndim);
+    if (ndim == 0) return py::array_t<T>{};
+
+    if (axis < -1 || axis >= ndim)
+        throw std::invalid_argument("take: axis out of range");
+
+    std::vector<ptrdiff_t> shape(buf.shape.begin(), buf.shape.end());
+    size_t ni = static_cast<size_t>(ibuf.size);
+    const ptrdiff_t* idx_ptr = static_cast<const ptrdiff_t*>(ibuf.ptr);
+
+    // Build output shape
+    std::vector<py::ssize_t> out_shape;
+    if (axis == -1) {
+        // axis=None → flat gather
+        out_shape.push_back(static_cast<py::ssize_t>(ni));
+    } else {
+        for (int d = 0; d < ndim; ++d) {
+            if (d == axis) out_shape.push_back(static_cast<py::ssize_t>(ni));
+            else           out_shape.push_back(buf.shape[d]);
+        }
+    }
+
+    py::array_t<T> result(out_shape);
+    numpy::take(static_cast<const T*>(buf.ptr),
+                static_cast<T*>(result.request().ptr),
+                shape.data(), ndim, axis, idx_ptr, ni);
+    return result;
+}
+
+// ── numpy.compress ───────────────────────────────────────────────────────────
+
+/// numpy.compress(condition, a, axis=None)
+/// Boolean mask gather.  The array is treated as flat (axis=None).
+/// Returns a 1-D array of elements where mask[i] is true.
+template<typename T>
+py::array_t<T> compress(const py::array_t<T>& arr,
+                         const py::array_t<bool>& mask) {
+    auto buf  = arr.request();
+    auto mbuf = mask.request();
+    size_t n   = static_cast<size_t>(buf.size);
+    size_t nm  = static_cast<size_t>(mbuf.size);
+    size_t use = std::min(n, nm);
+    const bool* m = static_cast<const bool*>(mbuf.ptr);
+
+    // Count trues first so we can allocate exact output
+    size_t cnt = 0;
+    for (size_t i = 0; i < use; ++i) if (m[i]) ++cnt;
+
+    py::array_t<T> result({static_cast<py::ssize_t>(cnt)});
+    if (cnt > 0)
+        numpy::compress(static_cast<const T*>(buf.ptr),
+                        static_cast<T*>(result.request().ptr),
+                        m, use);
+    return result;
+}
+
+// ── slice() overload: N-D slice with per-dimension step ──────────────────────
+
+/// slice(a, starts, stops, steps) — N-D generalization of slice(a, start, stop).
+///
+/// Overload of the existing slice() function; this variant accepts three
+/// equal-length vectors (one entry per array dimension) instead of scalar
+/// start/stop, enabling arbitrary step and multi-dimensional slicing.
+///
+/// starts/stops/steps must be pre-normalized (use Python's
+///   slice(s,e,k).indices(dim_size) to obtain canonical values).
+///
+/// Examples:
+///   slice(a, {0}, {10}, {2})        → a[::2]
+///   slice(a, {9}, {-1}, {-1})       → a[::-1]   (stop=-1 = "before index 0")
+///   slice(a, {1,2}, {3,5}, {1,1})   → a[1:3, 2:5]
+///   slice(a, {n-1,0}, {-1,m}, {-1,2}) → a[::-1, ::2]
+template<typename T>
+py::array_t<T> slice(const py::array_t<T>& arr,
+                     const std::vector<py::ssize_t>& starts,
+                     const std::vector<py::ssize_t>& stops,
+                     const std::vector<py::ssize_t>& steps) {
+    auto buf = arr.request();
+    int ndim = static_cast<int>(buf.ndim);
+
+    if (static_cast<int>(starts.size()) != ndim ||
+        static_cast<int>(stops.size())  != ndim ||
+        static_cast<int>(steps.size())  != ndim)
+        throw std::invalid_argument("slice: starts/stops/steps must match array ndim");
+
+    std::vector<ptrdiff_t> shape(buf.shape.begin(), buf.shape.end());
+    std::vector<ptrdiff_t> st(starts.begin(), starts.end());
+    std::vector<ptrdiff_t> sp(stops.begin(),  stops.end());
+    std::vector<ptrdiff_t> sv(steps.begin(),  steps.end());
+
+    // Compute output shape
+    std::vector<py::ssize_t> out_shape(ndim);
+    for (int d = 0; d < ndim; ++d) {
+        ptrdiff_t len = numpy::slice_len(st[d], sp[d], sv[d]);
+        if (len <= 0) {
+            // Return empty array with zeros in all dims (matches numpy)
+            std::vector<py::ssize_t> empty_shape(ndim, 0);
+            return py::array_t<T>(empty_shape);
+        }
+        out_shape[d] = static_cast<py::ssize_t>(len);
+    }
+
+    py::array_t<T> result(out_shape);
+    numpy::slice(static_cast<const T*>(buf.ptr),
+                 static_cast<T*>(result.request().ptr),
+                 shape.data(), ndim,
+                 st.data(), sp.data(), sv.data());
+    return result;
+}
+
+// ── numpy.put ────────────────────────────────────────────────────────────────
+
+/// numpy.put(a, indices, values, mode='raise')
+/// Scatters values into arr at flat indices (in-place).
+/// Negative indices: idx < 0 → idx += n.
+/// Out-of-range indices are silently ignored (safe / clip behaviour).
+template<typename T>
+void put(py::array_t<T> arr,
+         const py::array_t<py::ssize_t>& indices,
+         const py::array_t<T>& values) {
+    auto buf  = arr.request();
+    auto ibuf = indices.request();
+    auto vbuf = values.request();
+    numpy::put(static_cast<T*>(buf.ptr),
+               static_cast<size_t>(buf.size),
+               static_cast<const ptrdiff_t*>(ibuf.ptr),
+               static_cast<const T*>(vbuf.ptr),
+               static_cast<size_t>(std::min(ibuf.size, vbuf.size)));
+}
+
+// ── putmask: numpy.putmask ────────────────────────────────────────────────────
+
+/// numpy.putmask(a, mask, values) — scalar variant.
+/// In-place: sets a[i] = value for every i where mask[i] is True.
+/// Equivalent to Python:  a[mask] = scalar
+template<typename T>
+void putmask(py::array_t<T> arr,
+             const py::array_t<bool>& mask, T value) {
+    auto buf  = arr.request();
+    auto mbuf = mask.request();
+    numpy::putmask(
+        static_cast<T*>(buf.ptr),
+        static_cast<const bool*>(mbuf.ptr),
+        static_cast<size_t>(std::min(buf.size, mbuf.size)),
+        value);
+}
+
+/// numpy.putmask(a, mask, values) — array variant.
+/// In-place: sets a[i] = values[j++] for the j-th True position i.
+/// Equivalent to Python:  a[mask] = array_of_values
+template<typename T>
+void putmask(py::array_t<T> arr,
+             const py::array_t<bool>& mask,
+             const py::array_t<T>& values) {
+    auto buf  = arr.request();
+    auto mbuf = mask.request();
+    auto vbuf = values.request();
+    numpy::putmask(
+        static_cast<T*>(buf.ptr),
+        static_cast<const bool*>(mbuf.ptr),
+        static_cast<size_t>(std::min(buf.size, mbuf.size)),
+        static_cast<const T*>(vbuf.ptr));
+}
+
+// ── slice_assign() overload: N-D in-place slice assignment ───────────────────
+
+/// slice_assign(a, starts, stops, steps, scalar) — N-D in-place slice assign.
+/// Overload of the existing slice_assign(); this variant accepts step vectors.
+/// In-place: a[s0:e0:k0, s1:e1:k1, ...] = scalar
+template<typename T>
+void slice_assign(py::array_t<T> arr,
+                  const std::vector<py::ssize_t>& starts,
+                  const std::vector<py::ssize_t>& stops,
+                  const std::vector<py::ssize_t>& steps,
+                  T value) {
+    auto buf = arr.request();
+    int ndim = static_cast<int>(buf.ndim);
+    if (static_cast<int>(starts.size()) != ndim ||
+        static_cast<int>(stops.size())  != ndim ||
+        static_cast<int>(steps.size())  != ndim)
+        throw std::invalid_argument(
+            "slice_assign: starts/stops/steps must match array ndim");
+
+    std::vector<ptrdiff_t> shape(buf.shape.begin(), buf.shape.end());
+    std::vector<ptrdiff_t> st(starts.begin(), starts.end());
+    std::vector<ptrdiff_t> sp(stops.begin(),  stops.end());
+    std::vector<ptrdiff_t> sv(steps.begin(),  steps.end());
+
+    numpy::slice_assign(
+        static_cast<T*>(buf.ptr),
+        shape.data(), ndim,
+        st.data(), sp.data(), sv.data(), value);
+}
+
+/// slice_assign(a, starts, stops, steps, values) — N-D in-place slice assign.
+/// Overload of slice_assign(); this variant accepts an array of values.
+/// values must contain exactly product(slice_shape) elements in C-order.
+/// In-place: a[s0:e0:k0, s1:e1:k1, ...] = values_array
+template<typename T>
+void slice_assign(py::array_t<T> arr,
+                  const std::vector<py::ssize_t>& starts,
+                  const std::vector<py::ssize_t>& stops,
+                  const std::vector<py::ssize_t>& steps,
+                  const py::array_t<T>& values) {
+    auto buf = arr.request();
+    int ndim = static_cast<int>(buf.ndim);
+    if (static_cast<int>(starts.size()) != ndim ||
+        static_cast<int>(stops.size())  != ndim ||
+        static_cast<int>(steps.size())  != ndim)
+        throw std::invalid_argument(
+            "slice_assign: starts/stops/steps must match array ndim");
+
+    std::vector<ptrdiff_t> shape(buf.shape.begin(), buf.shape.end());
+    std::vector<ptrdiff_t> st(starts.begin(), starts.end());
+    std::vector<ptrdiff_t> sp(stops.begin(),  stops.end());
+    std::vector<ptrdiff_t> sv(steps.begin(),  steps.end());
+
+    auto vbuf = values.request();
+    numpy::slice_assign(
+        static_cast<T*>(buf.ptr),
+        shape.data(), ndim,
+        st.data(), sp.data(), sv.data(),
+        static_cast<const T*>(vbuf.ptr));
+}
+
 } // namespace numpy
