@@ -119,6 +119,7 @@ Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly
 The test suite verifies **bit-level precision alignment** between every C++ function and Python numpy.
 No tolerance, no `atol`/`rtol` — raw IEEE 754 bits must match exactly.
 900 tests: float64 + float32, including NaN passthrough, signed-zero, ±∞, domain errors, advanced indexing, and AVX-512 boundary sizes.
+In std mode ~399 precision-independent tests run (structural, reduction, manipulation, io, comparison, astype, advanced indexing).
 
 ```bash
 # build
