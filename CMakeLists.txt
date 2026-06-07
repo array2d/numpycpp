@@ -65,6 +65,8 @@ set(CPACK_DEBIAN_PACKAGE_SECTION           "libdevel")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY          "optional")
 set(CPACK_DEBIAN_FILE_NAME                 "numpycpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb")
 set(CPACK_PACKAGING_INSTALL_PREFIX         "/usr")
+# Wipe the old include tree on install/upgrade so stale headers cannot accumulate.
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/preinst")
 
 include(CPack)
 

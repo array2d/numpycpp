@@ -1,0 +1,10 @@
+#!/bin/sh
+# numpycpp DEB pre-install hook.
+# Always wipe the previous include tree so stale headers cannot accumulate
+# across version upgrades (e.g. old numpy/core.h would shadow new modules).
+set -e
+case "$1" in
+    install|upgrade)
+        rm -rf /usr/include/numpycpp
+        ;;
+esac

@@ -4,7 +4,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
-#include "../numpy/einsum.h"
+#include "../numpy/numpy.h"
 #include <vector>
 
 namespace py = pybind11;

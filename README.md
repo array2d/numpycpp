@@ -29,17 +29,26 @@ All APIs are tested against Python numpy under strict bit-level comparison: ever
 
 ### Usage
 
-**Public headers** — these are the only files you should `#include`:
+**Public headers** — include the umbrella or individual modules:
 
 ```cpp
-#include "numpy/core.h"     // numpy.* equivalents
-#include "numpy/linalg.h"   // numpy.linalg.*
-#include "numpy/einsum.h"   // numpy.einsum
+#include "numpy/numpy.h"          // ← single entry point (recommended)
+
+// or include only what you need:
+#include "numpy/init.h"           // zeros_like, ones_like, full
+#include "numpy/elementwise.h"    // sqrt, exp, sin, astype, …
+#include "numpy/reduce.h"         // sum, mean, std, var, cumsum, …
+#include "numpy/manipulation.h"   // transpose, take, slice, putmask, …
+#include "numpy/io.h"             // isin, interp, unwrap, …
+#include "numpy/linalg.h"         // dot, norm, matmul, einsum
 ```
 
 > `numpy/detail/` headers are **internal** — automatically pulled in by the
 > public headers. Do not include them directly; a compile-time `#error` fires
 > if you try.
+>
+> Legacy single-file headers `numpy/core.h` and `numpy/einsum.h` are kept as
+> backward-compatible shims that simply `#include "numpy/numpy.h"`.
 
 ```cpp
 std::vector<double> data = {1.0, 4.0, 9.0};
@@ -212,25 +221,32 @@ All 900 tests pass under strict IEEE 754 bit comparison (float64 + float32).
 
 ```
 numpycpp/
-├── numpy/                    # native C++ headers
-│   ├── core.h                # [PUBLIC]   numpy.* equivalents
-│   ├── linalg.h              # [PUBLIC]   numpy.linalg.*
-│   ├── einsum.h              # [PUBLIC]   numpy.einsum
-│   └── detail/               # [INTERNAL] do not include directly — #error guard
-│       ├── svml_bridge.h     #   SVML / npy_* scalar math dispatch
-│       ├── npy_math_float.h  #   npy_* float32 wrappers
-│       ├── blas_bridge.h     #   BLAS (cblas) thin wrappers
-│       └── avx512_loops.h    #   AVX-512 vectorised exp/sin/cos loops
-├── pycpp/                    # pybind11 wrappers (optional)
+├── numpy/                      # native C++ headers
+│   ├── numpy.h                 # [PUBLIC]   umbrella — #includes everything below
+│   ├── init.h                  # [PUBLIC]   zeros_like, ones_like, full
+│   ├── elementwise.h           # [PUBLIC]   sqrt/exp/sin/…, comparison, logical, astype
+│   ├── reduce.h                # [PUBLIC]   sum/mean/std/var/cumsum, axis reductions
+│   ├── manipulation.h          # [PUBLIC]   transpose/take/slice/put/putmask/argsort/…
+│   ├── io.h                    # [PUBLIC]   isin, interp, unwrap, safe_divide
+│   ├── linalg.h                # [PUBLIC]   dot, norm, matmul, einsum
+│   ├── core.h                  # [SHIM]     backward-compat → #include "numpy.h"
+│   ├── einsum.h                # [SHIM]     backward-compat → #include "numpy.h"
+│   └── detail/                 # [INTERNAL] do not include directly — #error guard
+│       ├── macros.h            #   NUMPY_UNROLL4, NUMPY_SMALL_STACK
+│       ├── svml_bridge.h       #   SVML / npy_* scalar math dispatch
+│       ├── npy_math_float.h    #   npy_* float32 wrappers
+│       ├── blas_bridge.h       #   BLAS (cblas) thin wrappers
+│       └── avx512_loops.h      #   AVX-512 vectorised exp/sin/cos loops
+├── pycpp/                      # pybind11 wrappers (optional)
 │   ├── core_py.h
 │   ├── linalg_py.h
 │   └── einsum_py.h
-├── tests/                    # bit-level precision tests + test module
-│   ├── module.cpp            # pybind11 module for testing
-│   ├── test_all.py           # single entry — all APIs, 900 tests, float64+float32
-│   ├── conftest.py           # silent-mode output suppression
-│   └── CMakeLists.txt        # test-module build
-├── CMakeLists.txt            # build & .deb packaging
+├── tests/                      # bit-level precision tests + test module
+│   ├── module.cpp              # pybind11 module for testing
+│   ├── test_all.py             # single entry — all APIs, 900 tests, float64+float32
+│   ├── conftest.py             # silent-mode output suppression
+│   └── CMakeLists.txt          # test-module build
+├── CMakeLists.txt              # build & .deb packaging
 └── README.md
 ```
 
