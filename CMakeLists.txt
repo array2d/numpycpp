@@ -79,31 +79,21 @@ install(DIRECTORY example/
 )
 
 # ---- CPack DEB packaging ----------------------------------------------------
-# Package name and file name differ by backend flavor.
-# File naming: numpycpp-dev-<version>-<flavor>-Linux.deb
-#   bitexact: numpycpp-dev-1.21.2-bitexact-Linux.deb
-#   std:      numpycpp-dev-1.21.2-std-Linux.deb
-# Package name keeps the flavor so both DEBs can coexist on the same machine.
-if(NUMPYCPP_STD_ONLY)
-    set(_NUMPYCPP_DEB_FLAVOR     "std")
-    set(_NUMPYCPP_DEB_SUMMARY    "C++ numpy-API header-only library — pure std backend (perf-first)")
-else()
-    set(_NUMPYCPP_DEB_FLAVOR     "bitexact")
-    set(_NUMPYCPP_DEB_SUMMARY    "C++ numpy-API header-only library — bit-exact backend (SVML + BLAS)")
-endif()
-
-set(CPACK_PACKAGE_NAME                     "numpycpp-dev-${_NUMPYCPP_DEB_FLAVOR}")
+# Single DEB — header-only library, backend is a consumer compile-time choice.
+# File: numpycpp-dev-<version>-Linux.deb
+set(CPACK_PACKAGE_NAME                     "numpycpp-dev")
 set(CPACK_PACKAGE_VERSION                  ${PROJECT_VERSION})
 set(CPACK_PACKAGE_VENDOR                   "miaobyte")
 set(CPACK_PACKAGE_CONTACT                  "miaobyte")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY      "${_NUMPYCPP_DEB_SUMMARY}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "C++ numpy-API header-only library (bitexact + std backends, C++17)")
 set(CPACK_GENERATOR                        "DEB")
 set(CPACK_DEB_COMPONENT_INSTALL            OFF)
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER        "miaobyte")
 set(CPACK_DEBIAN_PACKAGE_SECTION           "libdevel")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY          "optional")
 set(CPACK_DEBIAN_FILE_NAME
-    "numpycpp-dev-${CPACK_PACKAGE_VERSION}-${_NUMPYCPP_DEB_FLAVOR}-Linux.deb")
+    "numpycpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb")
 set(CPACK_PACKAGING_INSTALL_PREFIX         "/usr")
 # Wipe the old include tree on install/upgrade so stale headers cannot accumulate.
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/preinst")
@@ -113,7 +103,7 @@ include(CPack)
 # Convenience target
 add_custom_target(deb
     COMMAND cpack -G DEB
-    COMMENT "Packaging numpycpp-dev-${_NUMPYCPP_DEB_FLAVOR}-${CPACK_PACKAGE_VERSION}-Linux.deb"
+    COMMENT "Packaging numpycpp-dev-${CPACK_PACKAGE_VERSION}-Linux.deb"
 )
 
 message(STATUS "numpycpp v${PROJECT_VERSION}  (header-only C++ library)")

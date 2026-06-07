@@ -1,17 +1,16 @@
 # CI: build and test both backends on every push/PR.
 #
-# Two jobs run in parallel:
+# Two test jobs run in parallel:
 #   test-bitexact — NUMPYCPP_STD_ONLY=OFF (default)
 #     All 900 tests verify IEEE-754 bit-identical results vs numpy.
 #     Requires: numpy .so loaded (OpenBLAS + SVML dlsym), AVX-512 capable CPU.
 #
 #   test-std       — NUMPYCPP_STD_ONLY=ON
-#     Same API, pure <cmath> + C++ loops. Tests run with atol/rtol tolerance.
+#     Same API, pure <cmath> + C++ loops. ~423 precision-independent tests.
 #     No external math dependencies.
 #
-# DEB packaging (flavor appears after version number in filename):
-#   cmake -DNUMPYCPP_STD_ONLY=OFF → numpycpp-dev-<ver>-bitexact-Linux.deb
-#   cmake -DNUMPYCPP_STD_ONLY=ON  → numpycpp-dev-<ver>-std-Linux.deb
+# DEB packaging: single DEB (header-only — backend is consumer's compile choice)
+#   cmake .. → numpycpp-dev-<ver>-Linux.deb
 
 name: CI
 
@@ -110,31 +109,26 @@ jobs:
           cd tests
           python -m pytest test_all.py -q --tb=short --no-header -k "not (test_unary_math or test_dot or test_norm or test_matmul or TestEinsum or test_avx512_boundary or test_nan_passthrough or test_nan_mixed or test_domain or signed_zero or _inf or test_sign_inf)"
 
-  # ── Job 3: package both DEBs ─────────────────────────────────────────────────
+  # ── Job 3: package DEB ───────────────────────────────────────────────────────
   package:
-    name: Package DEBs
+    name: Package DEB
     runs-on: ubuntu-latest
     needs: [test-bitexact, test-std]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build bitexact DEB
+      - name: Build DEB
+        # Header-only: both backends ship in one DEB.
+        # Backend is selected by the consumer at cmake configure time
+        # via -DNUMPYCPP_STD_ONLY=ON/OFF.
         run: |
-          cmake -S . -B build_bitexact -DNUMPYCPP_STD_ONLY=OFF
-          cmake --build build_bitexact --target deb
-          ls build_bitexact/numpycpp-dev-*-bitexact-*.deb
+          cmake -S . -B build_deb
+          cmake --build build_deb --target deb
+          ls build_deb/numpycpp-dev-*.deb
 
-      - name: Build std DEB
-        run: |
-          cmake -S . -B build_std_deb -DNUMPYCPP_STD_ONLY=ON
-          cmake --build build_std_deb --target deb
-          ls build_std_deb/numpycpp-dev-*-std-*.deb
-
-      - name: Upload DEBs as artifacts
+      - name: Upload DEB as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: numpycpp-debs
-          path: |
-            build_bitexact/*.deb
-            build_std_deb/*.deb
+          name: numpycpp-dev-deb
+          path: build_deb/numpycpp-dev-*.deb

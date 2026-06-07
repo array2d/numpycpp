@@ -69,34 +69,50 @@ Download the [latest `.deb` release](https://github.com/array2d/numpycpp/release
 
 ```bash
 mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake ..
 make deb
 sudo dpkg -i numpycpp-dev-*.deb
 ```
 
-Headers are installed to `/usr/include/numpycpp/` along with CMake config. Consuming projects use:
+Headers are installed to `/usr/include/numpycpp/` along with a CMake config that supports both backends.
+
+**CMake — bitexact backend (default)**
 
 ```cmake
 find_package(numpycpp REQUIRED)
 target_link_libraries(myapp PRIVATE numpycpp::numpycpp)
+# cmake propagates -ldl automatically — no extra flags needed
+```
+
+**CMake — std backend**
+
+```cmake
+set(NUMPYCPP_STD_ONLY ON)           # set BEFORE find_package
+find_package(numpycpp REQUIRED)
+target_link_libraries(myapp PRIVATE numpycpp::numpycpp)
+# cmake propagates -DNUMPYCPP_STD_ONLY automatically — no extra flags needed
 ```
 
 **pybind11_add_module users**
 
 With certain CMake / pybind11 version combinations, `pybind11_add_module` may lose IMPORTED targets
-during generation (target exists at configure time but disappears at generate time).
-If you hit this, use the variables-based fallback:
+during generation. If you hit this, use the variables-based fallback:
 
 ```cmake
+set(NUMPYCPP_STD_ONLY OFF)          # or ON for std backend
 find_package(numpycpp REQUIRED)
 pybind11_add_module(mymodule module.cpp)
 target_include_directories(mymodule PRIVATE ${numpycpp_INCLUDE_DIRS})
 target_compile_features(mymodule PRIVATE cxx_std_17)
+# bitexact: add manually → target_link_libraries(mymodule PRIVATE dl)
+# std:      add manually → target_compile_definitions(mymodule PRIVATE NUMPYCPP_STD_ONLY)
 ```
 
 **Manual (header-only)**
 
 Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly. No build step, no copy required.
+- Bitexact backend: add `-ldl` at link time (no other flags needed at `-O2`; see compiler flags table below)
+- Std backend: add `-DNUMPYCPP_STD_ONLY` (no `-ldl` needed)
 
 ### Testing
 
@@ -119,6 +135,10 @@ numpycpp ships two interchangeable math backends selected via a single cmake fla
 All public APIs (`numpy::exp`, `numpy::dot`, `numpy::einsum`, …) are identical;
 only the internal implementation and precision guarantee differ.
 
+The library is **header-only** — both backends live in the same installed headers.
+The backend is a **consumer compile-time choice**, not an install-time choice.
+One DEB installs everything; `NUMPYCPP_STD_ONLY` selects the backend.
+
 ```cmake
 cmake -DNUMPYCPP_STD_ONLY=OFF ..   # default — bit-exact backend
 cmake -DNUMPYCPP_STD_ONLY=ON  ..   # std / performance-first backend
@@ -130,7 +150,7 @@ cmake -DNUMPYCPP_STD_ONLY=ON  ..   # std / performance-first backend
 | **Dot / matmul** | OpenBLAS ILP64 via `dlsym` | Pure C++ loops (auto-vectorised) |
 | **Precision vs numpy** | **IEEE 754 bit-identical** | 0–2 ULP (not bit-exact) |
 | **External deps** | libdl + numpy `.so` loaded | **None** — pure C++17 |
-| **DEB package** | `numpycpp-dev-<ver>-bitexact-Linux.deb` | `numpycpp-dev-<ver>-std-Linux.deb` |
+| **DEB package** | same `numpycpp-dev-<ver>-Linux.deb` | same `numpycpp-dev-<ver>-Linux.deb` |
 | **cmake propagation** | `target_link_libraries(… dl)` | `target_compile_definitions(… NUMPYCPP_STD_ONLY)` |
 
 #### Compiler flags — bitexact backend (`NUMPYCPP_STD_ONLY=OFF`)
@@ -169,7 +189,7 @@ target_compile_options(<target> PRIVATE
 
 | Flag | Status | Why |
 |------|:------:|-----|
-| `NUMPYCPP_STD_ONLY` | **required** | Selects `std_math_backend.h` + `std_linalg_backend.h` instead of SVML/BLAS bridges. Propagated automatically when using `find_package(numpycpp)` with the std DEB. |
+| `NUMPYCPP_STD_ONLY` | **required** | Selects `std_math_backend.h` + `std_linalg_backend.h` instead of SVML/BLAS bridges. Set via `cmake -DNUMPYCPP_STD_ONLY=ON` or `set(NUMPYCPP_STD_ONLY ON)` before `find_package`. |
 | `-O3 -march=native` | recommended | Enables full auto-vectorisation of the C++ loops (exp/dot/gemm). Without optimisation, std backend is slow. |
 | `-ffp-contract=off` | **not needed** | FMA contraction is welcome in std mode — improves precision and performance of gemm/dot. |
 | `-mavx512f -mprefer-vector-width=256` | **not needed** | SVML bridge not compiled in; no ZMM-trap risk. `-march=native` selects appropriate SIMD automatically. |
