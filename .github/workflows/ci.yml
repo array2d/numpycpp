@@ -98,23 +98,17 @@ jobs:
         run: cmake --build tests/build_std -j$(nproc)
 
       - name: Run API-compatibility tests (std mode)
-        run: |
-          cd tests
-          # Use the std .so (placed alongside test_all.py by CMake)
-          python -m pytest test_all.py -q --tb=short --no-header \
-            -k "not (test_unary_math or test_dot or test_norm or test_matmul or
-                     TestEinsum or test_avx512_boundary or
-                     test_nan_passthrough or test_nan_mixed or
-                     test_domain or signed_zero or _inf or test_sign_inf)"
-        # Skipped in std mode (std::exp/log/sin and C++ loops are NOT
-        # bit-identical to numpy's npy_* kernels / OpenBLAS):
+        # std mode: skip tests that require bit-exact transcendental / BLAS results.
+        # All structural, reduction, manipulation, io, comparison, astype,
+        # and advanced-indexing tests still run (~423 / 900).
         #   test_unary_math      — transcendental element-wise (exp/log/sin/…)
         #   test_dot/norm/matmul — linalg (BLAS vs C++ loops)
-        #   TestEinsum           — einsum (SSE kernel + BLAS vs loops)
-        #   test_avx512_boundary — AVX-512 vectorised path not present in std
+        #   TestEinsum           — einsum (BLAS vs loops)
+        #   test_avx512_boundary — AVX-512 path not present in std build
         #   nan/domain/signed_zero/_inf — transcendental edge cases
-        # All structural, reduction, manipulation, io, comparison, astype,
-        # and advanced-indexing tests still run (423 / 900).
+        run: |
+          cd tests
+          python -m pytest test_all.py -q --tb=short --no-header -k "not (test_unary_math or test_dot or test_norm or test_matmul or TestEinsum or test_avx512_boundary or test_nan_passthrough or test_nan_mixed or test_domain or signed_zero or _inf or test_sign_inf)"
 
   # ── Job 3: package both DEBs ─────────────────────────────────────────────────
   package:
