@@ -37,14 +37,16 @@
 #include <algorithm>
 
 // ── Internal detail headers ──────────────────────────────────────────────────
-// svml_bridge.h provides numpy::detail::{exp,log,sin,...}_f32/f64.
-// avx512_loops.h provides AVX-512 specialisations of the primary templates.
-// Both require NUMPYCPP_INTERNAL_INCLUDE to be set; we manage that here.
+// math_backend.h selects the math implementation at compile time:
+//   NUMPYCPP_STD_ONLY not set → svml_bridge.h (bit-exact, dlsym + SVML)
+//   NUMPYCPP_STD_ONLY     set → std_math_backend.h (pure <cmath>, perf-first)
+// avx512_loops.h provides AVX-512 specialisations; skipped in STD_ONLY mode.
+// Both require NUMPYCPP_INTERNAL_INCLUDE; we manage that here.
 #ifndef NUMPYCPP_INTERNAL_INCLUDE
 #  define NUMPYCPP_INTERNAL_INCLUDE
 #  define _NUMPYCPP_EW_OWNS_GUARD
 #endif
-#include "detail/svml_bridge.h"
+#include "detail/math_backend.h"
 #include "detail/macros.h"   // NUMPY_UNROLL4
 
 namespace numpy {
@@ -352,8 +354,11 @@ inline void truncate_to_float32(const double* src, double* dst, size_t n) {
 // ============================================================================
 // AVX-512 wide-loop template specialisations (0 ULP, ~8-16x faster)
 // Must appear inside namespace numpy after all primary templates.
+// Skipped in STD_ONLY mode (no SVML, no AVX-512 intrinsics needed).
 // ============================================================================
+#ifndef NUMPYCPP_STD_ONLY
 #include "detail/avx512_loops.h"
+#endif
 
 } // namespace numpy
 

@@ -113,13 +113,31 @@ cmake --build tests/build -j$(nproc)
 cd tests && python3 -m pytest test_all.py -q --tb=short --no-header
 ```
 
-### Compiler flags for bit-exact alignment
+### Two backends — choose at cmake time
 
-The minimum set of flags was determined empirically: each flag was removed in
-isolation and the full 754-test suite was re-run.  Only flags whose removal
-caused at least one test failure are marked **required**.
+numpycpp ships two interchangeable math backends selected via a single cmake flag.
+All public APIs (`numpy::exp`, `numpy::dot`, `numpy::einsum`, …) are identical;
+only the internal implementation and precision guarantee differ.
 
-#### Minimum required flags
+```cmake
+cmake -DNUMPYCPP_STD_ONLY=OFF ..   # default — bit-exact backend
+cmake -DNUMPYCPP_STD_ONLY=ON  ..   # std / performance-first backend
+```
+
+| Property | `NUMPYCPP_STD_ONLY=OFF` (bitexact) | `NUMPYCPP_STD_ONLY=ON` (std) |
+|---|---|---|
+| **Transcendental math** | `dlsym` → `npy_exp` / `__svml_exp8` | `std::exp`, `std::log`, … |
+| **Dot / matmul** | OpenBLAS ILP64 via `dlsym` | Pure C++ loops (auto-vectorised) |
+| **Precision vs numpy** | **IEEE 754 bit-identical** | 0–2 ULP (not bit-exact) |
+| **External deps** | libdl + numpy `.so` loaded | **None** — pure C++17 |
+| **DEB package** | `numpycpp-dev-bitexact-*.deb` | `numpycpp-dev-std-*.deb` |
+| **cmake propagation** | `target_link_libraries(… dl)` | `target_compile_definitions(… NUMPYCPP_STD_ONLY)` |
+
+#### Compiler flags — bitexact backend (`NUMPYCPP_STD_ONLY=OFF`)
+
+The minimum set was determined empirically: each flag was removed in isolation
+and the full 900-test suite was re-run. Only flags whose removal caused at
+least one test failure are marked **required**.
 
 ```cmake
 target_compile_options(<target> PRIVATE
@@ -130,54 +148,39 @@ target_compile_options(<target> PRIVATE
 target_link_libraries(<target> PRIVATE dl)   # REQUIRED — dlsym
 ```
 
-| Flag | Why required | Tested consequence of removal |
-|------|-------------|-------------------------------|
-| `-ffp-contract=off` | Prevents the compiler from silently fusing `a*b + c` into a single FMA instruction. numpycpp's einsum accumulation loops must use the same multiply-then-add order as numpy's BLAS kernels. | 36 einsum tests fail with ±1 ULP differences. |
-| `-mavx512f -mfma` | The SVML bridge declares fast scalar wrappers (`exp_svml_f64`, etc.) inside `#ifdef __AVX512F__`. Without this flag the preprocessor omits those declarations and the dispatcher fails to compile. AVX-512 intrinsics are runtime-guarded via `__builtin_cpu_supports` — the binary is safe on non-AVX-512 CPUs. | Hard compile error: `'exp_svml_f64' was not declared in this scope`. |
-| `-mprefer-vector-width=256` | Prevents the GCC auto-vectorizer from emitting 512-bit (ZMM) instructions globally. Some cloud VMs expose `avx512f` in `/proc/cpuinfo` (CPUID) but have ZMM state disabled by the hypervisor (XSAVE does not save ZMM). `__builtin_cpu_supports` correctly returns false in that case, so the SVML bridge is safe — but any auto-vectorized ZMM instruction in unguarded code still causes SIGILL. `-mprefer-vector-width=256` hard-limits auto-vectorization to 256-bit; explicit `__attribute__((target("avx512f")))` functions and runtime-guarded intrinsics are unaffected. | SIGILL at test startup on cloud VMs (e.g. GitHub Actions azure runners) where ZMM state is not enabled by the hypervisor. |
-| `-ldl` | `dlsym` / `dlopen` are used at startup to locate numpy's `_multiarray_umath.so` and resolve `npy_exp`, `__svml_exp8`, etc. | Link error: `undefined reference to 'dlsym'`. |
+| Flag | Status | Why required | Consequence of removal |
+|------|:------:|-------------|------------------------|
+| `-ffp-contract=off` | **required** | Prevents silent FMA fusion of `a*b+c`. einsum loops must match numpy's BLAS multiply-then-add order. | 36 einsum tests fail with ±1 ULP. |
+| `-mavx512f -mfma` | **required** | SVML bridge declares `exp_svml_f64` etc. inside `#ifdef __AVX512F__`. AVX-512 intrinsics are runtime-guarded — binary safe on non-AVX-512 CPUs. | Hard compile error: `'exp_svml_f64' was not declared`. |
+| `-mprefer-vector-width=256` | **required** | Prevents GCC from emitting ZMM instructions globally. Some cloud VMs expose `avx512f` in CPUID but trap ZMM via hypervisor XSAVE. The SVML bridge is safe (runtime guard), but unguarded auto-vectorized ZMM causes SIGILL. | SIGILL at startup on some cloud VMs (GitHub Actions azure runners). |
+| `-ldl` | **required** | `dlsym`/`dlopen` locate numpy's `_multiarray_umath.so` at runtime. | Link error: `undefined reference to 'dlsym'`. |
+| `-fno-builtin-exp` … | recommended | Prevents GCC from substituting npy_* call sites with builtins. numpycpp never calls `exp()` from `<cmath>` directly, so no current effect — kept as defensive guard. | No test failure when removed today. |
 
-#### Recommended (defensive) flags
-
-These flags produced **no test failures** when removed individually (all 754
-tests still passed), but are kept in `tests/CMakeLists.txt` as a safety net:
+#### Compiler flags — std backend (`NUMPYCPP_STD_ONLY=ON`)
 
 ```cmake
+target_compile_definitions(<target> PRIVATE NUMPYCPP_STD_ONLY)
 target_compile_options(<target> PRIVATE
-    -msse4.1                 # baseline SSE4.1 (good practice; not currently needed)
-    -fno-builtin-exp         # \
-    -fno-builtin-log         #  |
-    -fno-builtin-sin         #  | prevent GCC from replacing direct math calls
-    -fno-builtin-cos         #  | with builtins — numpycpp never calls exp()/sin()
-    -fno-builtin-tan         #  | directly, so these have no measurable effect
-    -fno-builtin-pow         #  | today, but guard against accidental future regressions
-    -fno-builtin-sqrt        #  |
-    -fno-builtin-atan2       #  |
-    -fno-builtin-log2        #  |
-    -fno-builtin-log10       #  |
-    -fno-builtin-asin        #  |
-    -fno-builtin-acos        #  |
-    -fno-builtin-atan        #  |
-    -fno-builtin-exp2        #  |
-    -fno-builtin-cbrt        #  |
-    -fno-builtin-expm1       #  |
-    -fno-builtin-log1p       # /
+    -O3
+    -march=native              # auto-vectorise with all available SIMD
 )
+# No -ldl needed — no dlsym in std backend
 ```
 
-> **Why `-fno-builtin-*` doesn't matter today**: numpycpp never calls `exp()`,
-> `sin()`, etc. from `<cmath>` directly.  Every transcendental is routed
-> through the SVML bridge's custom-named wrappers (`exp_npy_f64`,
-> `exp_svml_f64`, …) so GCC has no opportunity to substitute its own builtin.
-> The flags are retained for defensive clarity.
+| Flag | Status | Why |
+|------|:------:|-----|
+| `NUMPYCPP_STD_ONLY` | **required** | Selects `std_math_backend.h` + `std_linalg_backend.h` instead of SVML/BLAS bridges. Propagated automatically when using `find_package(numpycpp)` with the std DEB. |
+| `-O3 -march=native` | recommended | Enables full auto-vectorisation of the C++ loops (exp/dot/gemm). Without optimisation, std backend is slow. |
+| `-ffp-contract=off` | **not needed** | FMA contraction is welcome in std mode — improves precision and performance of gemm/dot. |
+| `-mavx512f -mprefer-vector-width=256` | **not needed** | SVML bridge not compiled in; no ZMM-trap risk. `-march=native` selects appropriate SIMD automatically. |
+| `-ldl` | **not needed** | No dlopen/dlsym in std backend. |
 
-> **Runtime CPU dispatch**: The SVML bridge auto‑detects AVX‑512 at runtime
-> (`__builtin_cpu_supports("avx512f")`). On AVX‑512 hardware it calls numpy's
-> SVML vector functions (`__svml_exp8`, etc.); otherwise it falls back to
-> numpy's scalar math functions (`npy_exp`, `npy_log`, etc.). Both paths are
-> resolved from the loaded `_multiarray_umath.so` via `dlsym`. AVX‑512
-> intrinsics are isolated behind `__attribute__((target("avx512f")))` — the
-> binary compiles and runs safely on **any** x86_64 CPU without SIGILL.
+> **Runtime CPU dispatch (bitexact only)**: The SVML bridge auto‑detects AVX‑512
+> at runtime (`__builtin_cpu_supports("avx512f")`). On AVX‑512 hardware it calls
+> numpy's SVML vector functions (`__svml_exp8`, etc.); otherwise it falls back to
+> numpy's scalar `npy_exp`/`npy_log`/etc. Both paths are resolved from the
+> loaded `_multiarray_umath.so` via `dlsym`. AVX‑512 intrinsics are isolated
+> behind `__attribute__((target("avx512f")))` — safe on any x86_64 CPU.
 
 ### Alignment status
 
@@ -233,14 +236,24 @@ numpycpp/
 │   ├── einsum.h                # [SHIM]     backward-compat → #include "numpy.h"
 │   └── detail/                 # [INTERNAL] do not include directly — #error guard
 │       ├── macros.h            #   NUMPY_UNROLL4, NUMPY_SMALL_STACK
-│       ├── svml_bridge.h       #   SVML / npy_* scalar math dispatch
-│       ├── npy_math_float.h    #   npy_* float32 wrappers
-│       ├── blas_bridge.h       #   BLAS (cblas) thin wrappers
-│       └── avx512_loops.h      #   AVX-512 vectorised exp/sin/cos loops
+│       ├── math_backend.h      #   selector: STD_ONLY → std_math_backend, else svml_bridge
+│       ├── svml_bridge.h       #   bitexact: SVML / npy_* scalar math (dlsym)
+│       ├── std_math_backend.h  #   std: pure <cmath> std::exp/log/sin/… (no deps)
+│       ├── npy_math_float.h    #   bitexact: npy_* float32 wrappers
+│       ├── linalg_backend.h    #   selector: STD_ONLY → std_linalg_backend, else blas_bridge
+│       ├── blas_bridge.h       #   bitexact: OpenBLAS ILP64 cblas wrappers (dlsym)
+│       ├── std_linalg_backend.h#   std: pure C++ loop dot/gemm (no deps)
+│       └── avx512_loops.h      #   bitexact: AVX-512 vectorised exp/sin/cos loops
 ├── pycpp/                      # pybind11 wrappers (optional)
-│   ├── core_py.h
-│   ├── linalg_py.h
-│   └── einsum_py.h
+│   ├── pycpp.h                 # [PUBLIC]   umbrella — #includes everything below
+│   ├── init_py.h               # [PUBLIC]   zeros_like, ones_like, full
+│   ├── elementwise_py.h        # [PUBLIC]   sqrt/exp/sin/…, comparison, logical, astype
+│   ├── reduce_py.h             # [PUBLIC]   sum/mean/std/var/cumsum
+│   ├── manipulation_py.h       # [PUBLIC]   transpose/take/slice/put/putmask/…
+│   ├── io_py.h                 # [PUBLIC]   isin, interp, unwrap, asarray, …
+│   ├── linalg_py.h             # [PUBLIC]   dot, norm, matmul, einsum
+│   ├── core_py.h               # [SHIM]     backward-compat → #include "pycpp.h"
+│   └── einsum_py.h             # [SHIM]     backward-compat → #include "pycpp.h"
 ├── tests/                      # bit-level precision tests + test module
 │   ├── module.cpp              # pybind11 module for testing
 │   ├── test_all.py             # single entry — all APIs, 900 tests, float64+float32

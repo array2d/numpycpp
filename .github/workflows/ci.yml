@@ -1,12 +1,17 @@
-# Bit-exact CI: every push/PR must pass all 792 IEEE-754 tests.
+# CI: build and test both backends on every push/PR.
 #
-# Requirements driving the setup:
-#   - numpy must be pip-installed (its bundled OpenBLAS exposes sdot_64_ /
-#     cblas_sgemm64_ / __svml_exp8 etc. that numpycpp resolves via dlsym)
-#   - AVX-512 hardware is required at runtime (-mavx512f compile flag +
-#     __attribute__((target)) guards; GitHub ubuntu-latest uses Intel Xeon
-#     which supports AVX-512)
-#   - pybind11, Eigen3, OpenMP needed to build the test extension module
+# Two jobs run in parallel:
+#   test-bitexact — NUMPYCPP_STD_ONLY=OFF (default)
+#     All 900 tests verify IEEE-754 bit-identical results vs numpy.
+#     Requires: numpy .so loaded (OpenBLAS + SVML dlsym), AVX-512 capable CPU.
+#
+#   test-std       — NUMPYCPP_STD_ONLY=ON
+#     Same API, pure <cmath> + C++ loops. Tests run with atol/rtol tolerance.
+#     No external math dependencies.
+#
+# DEB packaging:
+#   cmake -DNUMPYCPP_STD_ONLY=OFF → numpycpp-dev-bitexact-*.deb
+#   cmake -DNUMPYCPP_STD_ONLY=ON  → numpycpp-dev-std-*.deb
 
 name: CI
 
@@ -17,20 +22,15 @@ on:
     branches: [ master ]
 
 jobs:
-  test:
-    name: bit-exact tests — Python ${{ matrix.python }} / ${{ matrix.compiler }}
+  # ── Job 1: bit-exact backend ─────────────────────────────────────────────────
+  test-bitexact:
+    name: bitexact / Python ${{ matrix.python }}
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python: "3.10"
-            compiler: g++
-          - python: "3.11"
-            compiler: g++
-          - python: "3.12"
-            compiler: g++
+        python: ["3.10", "3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
@@ -47,8 +47,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libeigen3-dev
-          # libgomp1 (OpenMP runtime) and omp.h (OpenMP headers) are bundled
-          # with GCC on Ubuntu 24.04 — no separate libgomp1-dev package exists
 
       - name: Diagnose numpy symbols
         run: |
@@ -56,15 +54,84 @@ jobs:
           grep -q avx512f /proc/cpuinfo && echo "AVX-512: present in cpuinfo" || echo "AVX-512: NOT in cpuinfo"
         working-directory: tests
 
-      - name: Configure
-        run: cmake -S tests -B tests/build -DCMAKE_BUILD_TYPE=Release
-        env:
-          CXX: ${{ matrix.compiler }}
+      - name: Configure (bitexact)
+        run: cmake -S tests -B tests/build -DCMAKE_BUILD_TYPE=Release -DNUMPYCPP_STD_ONLY=OFF
 
       - name: Build
         run: cmake --build tests/build -j$(nproc)
 
-      - name: Run bit-exact tests
+      - name: Run 900 bit-exact tests
         run: |
           cd tests
           python -m pytest test_all.py -q --tb=short --no-header
+
+  # ── Job 2: std / performance-first backend ───────────────────────────────────
+  test-std:
+    name: std / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install Python dependencies
+        run: pip install "numpy>=1.23,<2.0" pybind11 pytest cmake
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libeigen3-dev
+
+      - name: Configure (std)
+        run: cmake -S tests -B tests/build_std -DCMAKE_BUILD_TYPE=Release -DNUMPYCPP_STD_ONLY=ON
+
+      - name: Build
+        run: cmake --build tests/build_std -j$(nproc)
+
+      - name: Run API-compatibility tests (std mode)
+        run: |
+          cd tests
+          # Use the std .so (placed alongside test_all.py by CMake)
+          python -m pytest test_all.py -q --tb=short --no-header \
+            -k "not test_nan_passthrough and not test_domain and not test_svml"
+        # Note: transcendental domain-error and NaN bit-pattern tests are
+        # skipped in std mode (std::exp/sin are not bit-identical to npy_*).
+        # All structural, reduction, manipulation, and linalg tests still run.
+
+  # ── Job 3: package both DEBs ─────────────────────────────────────────────────
+  package:
+    name: Package DEBs
+    runs-on: ubuntu-latest
+    needs: [test-bitexact, test-std]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build bitexact DEB
+        run: |
+          cmake -S . -B build_bitexact -DNUMPYCPP_STD_ONLY=OFF
+          cmake --build build_bitexact --target deb
+          ls build_bitexact/*.deb
+
+      - name: Build std DEB
+        run: |
+          cmake -S . -B build_std_deb -DNUMPYCPP_STD_ONLY=ON
+          cmake --build build_std_deb --target deb
+          ls build_std_deb/*.deb
+
+      - name: Upload DEBs as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: numpycpp-debs
+          path: |
+            build_bitexact/*.deb
+            build_std_deb/*.deb

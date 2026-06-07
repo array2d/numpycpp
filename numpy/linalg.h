@@ -22,18 +22,21 @@
 #include <algorithm>
 #include <stdexcept>
 #include <type_traits>
-#include <immintrin.h>
+#include <immintrin.h>   // SSE/AVX intrinsics (SSE2 is baseline on x86_64)
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
 // ── Internal detail headers ──────────────────────────────────────────────────
+// linalg_backend.h selects the linalg implementation at compile time:
+//   NUMPYCPP_STD_ONLY not set → blas_bridge.h (bit-exact, OpenBLAS ILP64)
+//   NUMPYCPP_STD_ONLY     set → std_linalg_backend.h (pure loops, perf-first)
 #ifndef NUMPYCPP_INTERNAL_INCLUDE
 #  define NUMPYCPP_INTERNAL_INCLUDE
 #  define _NUMPYCPP_LINALG_OWNS_GUARD
 #endif
-#include "detail/blas_bridge.h"
+#include "detail/linalg_backend.h"
 #ifdef _NUMPYCPP_LINALG_OWNS_GUARD
 #  undef NUMPYCPP_INTERNAL_INCLUDE
 #  undef _NUMPYCPP_LINALG_OWNS_GUARD

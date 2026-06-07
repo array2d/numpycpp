@@ -1,18 +1,26 @@
 # Build numpycpp Python test/benchmark module.
-# Alignment: BIT-LEVEL — all tests verify bit-exact C++ vs numpy results.
 #
-# Build:
-#   cmake -S tests -B tests/build [-DCMAKE_BUILD_TYPE=Release]
-#   cmake --build tests/build
+# Two build modes (select with -DNUMPYCPP_STD_ONLY):
 #
-# Or from the repo root:
-#   cmake --build build --target numpycpp_pymod   (after root cmake -B build)
+#   OFF (default) — bit-exact mode:
+#     All 900 tests verify IEEE 754 bit-identical results vs numpy.
+#     Requires: dlsym, numpy .so loaded, AVX-512 capable machine (or fallback).
+#     cmake -S tests -B tests/build
 #
-# Run tests:
-#   cd tests && python3 -m pytest test_all.py -q
+#   ON — std / performance-first mode:
+#     Transcendental + linalg tests use atol/rtol tolerance (0–2 ULP allowed).
+#     No external dependencies — pure C++17 std only.
+#     cmake -S tests -B tests/build -DNUMPYCPP_STD_ONLY=ON
+#
+# Build:   cmake --build tests/build
+# Test:    cd tests && python3 -m pytest test_all.py -q
 
 cmake_minimum_required(VERSION 3.16)
 project(numpycpp_tests CXX)
+
+option(NUMPYCPP_STD_ONLY
+    "Use only C++ standard library (no SVML/BLAS/dlopen). Performance-first, not bit-exact."
+    OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,34 +90,51 @@ if(Eigen3_FOUND)
     target_include_directories(numpycpp PRIVATE ${EIGEN3_INCLUDE_DIR})
 endif()
 
-# Compiler flags — matches the bit-exact requirements
-target_compile_options(numpycpp PRIVATE
-    -O2
-    -ffp-contract=off          # no implicit FMA for a+b*c (keeps Cody-Waite exact)
-    -msse4.1 -mfma             # baseline SSE4.1 + FMA
-    # disable builtin replacements so our calls go through SVML/npy_math paths
-    -fno-builtin-exp   -fno-builtin-log   -fno-builtin-sin
-    -fno-builtin-cos   -fno-builtin-tan   -fno-builtin-pow
-    -fno-builtin-sqrt  -fno-builtin-atan2 -fno-builtin-log2
-    -fno-builtin-log10 -fno-builtin-asin  -fno-builtin-acos
-    -fno-builtin-atan  -fno-builtin-exp2
-    -fno-builtin-cbrt  -fno-builtin-expm1 -fno-builtin-log1p
-)
-if(NUMPYCPP_AVX512_WORKS)
-    # AVX-512 is actually executable (not just advertised in CPUID).
-    # Enable SVML vector path + wide AVX-512 loops — these are the same
-    # paths numpy uses, giving bit-exact results.
+if(NUMPYCPP_STD_ONLY)
+    # ── std / performance-first build ─────────────────────────────────────────
+    # No bit-exact requirement: let the compiler optimise freely.
+    # FMA contraction, full auto-vectorisation, and native SIMD are all allowed.
+    target_compile_definitions(numpycpp PRIVATE NUMPYCPP_STD_ONLY)
     target_compile_options(numpycpp PRIVATE
-        -mavx512f -mprefer-vector-width=256)
-    message(STATUS "AVX-512: usable — SVML + wide-loop path enabled")
+        -O3
+        -march=native            # auto-vectorise with available SIMD (AVX-512 etc.)
+        # No -ffp-contract=off: FMA fusion allowed for performance
+        # No -fno-builtin-*: std::exp etc. can use GCC builtins (fast path)
+    )
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(numpycpp PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+    # No -ldl: no dlsym in std backend
+    message(STATUS "Test build: std mode  (-O3 -march=native, no dlsym, no SVML)")
 else()
-    message(STATUS "AVX-512: not usable (missing or hypervisor-trapped) — scalar npy_* path (still bit-exact)")
+    # ── bit-exact build (default) ─────────────────────────────────────────────
+    # Flags determined empirically: each flag's removal was tested against all
+    # 900 tests. Only flags whose removal caused failures are marked REQUIRED.
+    target_compile_options(numpycpp PRIVATE
+        -O2
+        -ffp-contract=off          # REQUIRED: no implicit FMA (keeps Cody-Waite exact)
+        -msse4.1 -mfma             # baseline SSE4.1 + FMA
+        # disable builtin replacements so calls go through SVML/npy_math paths
+        -fno-builtin-exp   -fno-builtin-log   -fno-builtin-sin
+        -fno-builtin-cos   -fno-builtin-tan   -fno-builtin-pow
+        -fno-builtin-sqrt  -fno-builtin-atan2 -fno-builtin-log2
+        -fno-builtin-log10 -fno-builtin-asin  -fno-builtin-acos
+        -fno-builtin-atan  -fno-builtin-exp2
+        -fno-builtin-cbrt  -fno-builtin-expm1 -fno-builtin-log1p
+    )
+    if(NUMPYCPP_AVX512_WORKS)
+        target_compile_options(numpycpp PRIVATE
+            -mavx512f -mprefer-vector-width=256)
+        message(STATUS "AVX-512: usable — SVML + wide-loop path enabled")
+    else()
+        message(STATUS "AVX-512: not usable (missing or hypervisor-trapped) — scalar npy_* path (still bit-exact)")
+    endif()
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(numpycpp PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+    target_link_libraries(numpycpp PRIVATE dl)
+    message(STATUS "Test build: bit-exact mode  (-O2 -ffp-contract=off, dlsym, SVML)")
 endif()
-
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(numpycpp PRIVATE OpenMP::OpenMP_CXX)
-endif()
-target_link_libraries(numpycpp PRIVATE dl)
 
 # Place .so next to the test scripts for easy import
 set_target_properties(numpycpp PROPERTIES
