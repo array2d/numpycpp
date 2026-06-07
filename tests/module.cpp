@@ -4,9 +4,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "core_py.h"
-#include "linalg_py.h"
-#include "einsum_py.h"
+#include "pycpp.h"
 
 namespace py = pybind11;
 
