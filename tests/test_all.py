@@ -490,6 +490,162 @@ def test_ones_like_bool(cpp):
 
 
 # ============================================================================
+# 7b. New creation routines: empty, arange, linspace, logspace, geomspace,
+#     eye, identity, diag
+# ============================================================================
+
+# -- empty -------------------------------------------------------------------
+
+@pytest.mark.parametrize("shape", [(5,), (3, 4)])
+def test_empty_shape(shape, cpp):
+    r = cpp.empty(list(shape))
+    assert r.shape == shape, f"empty{shape} shape"
+    assert r.dtype == np.float64, f"empty{shape} dtype"
+
+
+# -- arange ------------------------------------------------------------------
+
+@pytest.mark.parametrize("args,kwargs", [
+    ((10,),   {}),
+    ((1, 10), {}),
+    ((0, 10, 2), {}),
+    ((0.5, 5.5, 0.5), {}),
+    ((-3, 3, 1), {}),
+])
+def test_arange_f64(args, kwargs, cpp):
+    assert_bit_aligned(cpp.arange(*args, **kwargs), np.arange(*args, **kwargs),
+                       f"arange{args}")
+
+def test_arange_f32_inputs(cpp):
+    """numpy 1.23: arange with float32 inputs returns float64."""
+    s, e, st = np.float32(0), np.float32(10), np.float32(1)
+    r = cpp.arange(s, e, st)
+    assert r.dtype == np.float64, "arange(f32 inputs) dtype should be float64"
+    assert_bit_aligned(r, np.arange(s, e, st), "arange f32 inputs")
+
+def test_arange_single_arg(cpp):
+    assert_bit_aligned(cpp.arange(5.0), np.arange(5.0), "arange(5.0)")
+
+
+# -- linspace ----------------------------------------------------------------
+
+@pytest.mark.parametrize("start,stop,num,endpoint", [
+    (0.0, 1.0, 50, True),
+    (0.0, 1.0, 50, False),
+    (1.0, 10.0, 5, True),
+    (0.0, 0.0, 3, True),   # degenerate: same start/stop
+    (0.0, 1.0, 1, True),   # single point
+    (0.0, 1.0, 0, True),   # empty
+])
+def test_linspace_f64(start, stop, num, endpoint, cpp):
+    assert_bit_aligned(cpp.linspace(start, stop, num, endpoint),
+                       np.linspace(start, stop, num, endpoint=endpoint),
+                       f"linspace({start},{stop},{num},ep={endpoint})")
+
+def test_linspace_f32_inputs(cpp):
+    """numpy 1.23: linspace with float32 inputs returns float64."""
+    s, e = np.float32(0), np.float32(1)
+    r = cpp.linspace(s, e, 10)
+    assert r.dtype == np.float64, "linspace(f32 inputs) dtype should be float64"
+    assert_bit_aligned(r, np.linspace(s, e, 10), "linspace f32 inputs")
+
+
+# -- logspace ----------------------------------------------------------------
+
+@pytest.mark.parametrize("start,stop,num,endpoint,base", [
+    (0.0, 2.0, 5, True, 10.0),
+    (0.0, 2.0, 5, False, 10.0),
+    (0.0, 1.0, 4, True, 2.0),
+])
+def test_logspace_f64(start, stop, num, endpoint, base, cpp):
+    assert_bit_aligned(cpp.logspace(start, stop, num, endpoint, base),
+                       np.logspace(start, stop, num, endpoint=endpoint, base=base),
+                       f"logspace({start},{stop},{num},ep={endpoint},base={base})")
+
+def test_logspace_f32_inputs(cpp):
+    """numpy 1.23: logspace with float32 inputs returns float64."""
+    s, e = np.float32(0), np.float32(2)
+    r = cpp.logspace(s, e, 5)
+    assert r.dtype == np.float64, "logspace(f32 inputs) dtype should be float64"
+    assert_bit_aligned(r, np.logspace(s, e, 5), "logspace f32 inputs")
+
+
+# -- geomspace ---------------------------------------------------------------
+
+@pytest.mark.parametrize("start,stop,num,endpoint", [
+    (1.0, 1000.0, 4, True),
+    (1.0, 1000.0, 4, False),
+    (1.0, 256.0, 9, True),
+])
+def test_geomspace_f64(start, stop, num, endpoint, cpp):
+    assert_bit_aligned(cpp.geomspace(start, stop, num, endpoint),
+                       np.geomspace(start, stop, num, endpoint=endpoint),
+                       f"geomspace({start},{stop},{num},ep={endpoint})")
+
+def test_geomspace_f32_inputs(cpp):
+    """numpy 1.23: geomspace with float32 inputs returns float64."""
+    s, e = np.float32(1), np.float32(1000)
+    r = cpp.geomspace(s, e, 4)
+    assert r.dtype == np.float64, "geomspace(f32 inputs) dtype should be float64"
+    assert_bit_aligned(r, np.geomspace(s, e, 4), "geomspace f32 inputs")
+
+
+# -- eye ---------------------------------------------------------------------
+
+@pytest.mark.parametrize("N,M,k", [
+    (3, -1, 0),   # square, k=0
+    (3, -1, 1),   # square, k=+1
+    (3, -1, -1),  # square, k=-1
+    (3,  5,  0),  # wide
+    (5,  3,  0),  # tall
+    (4,  4,  2),  # k beyond diagonal
+])
+def test_eye(N, M, k, cpp):
+    if M < 0:
+        r = cpp.eye(N, M, k)
+        e = np.eye(N, k=k)
+    else:
+        r = cpp.eye(N, M, k)
+        e = np.eye(N, M, k)
+    assert_bit_aligned(r, e, f"eye({N},{M},{k})")
+
+def test_eye_default(cpp):
+    assert_bit_aligned(cpp.eye(4), np.eye(4), "eye(4)")
+
+
+# -- identity ----------------------------------------------------------------
+
+@pytest.mark.parametrize("n", [1, 3, 5])
+def test_identity(n, cpp):
+    assert_bit_aligned(cpp.identity(n), np.identity(n), f"identity({n})")
+
+
+# -- diag --------------------------------------------------------------------
+
+def test_diag_vec_to_mat(cpp):
+    """1-D → diagonal matrix, k=0"""
+    v = np.array([1.0, 2.0, 3.0])
+    assert_bit_aligned(cpp.diag(v), np.diag(v), "diag(vec,k=0)")
+
+@pytest.mark.parametrize("k", [-2, -1, 1, 2])
+def test_diag_vec_kdiag(k, cpp):
+    v = np.array([1.0, 2.0, 3.0])
+    assert_bit_aligned(cpp.diag(v, k), np.diag(v, k), f"diag(vec,k={k})")
+
+def test_diag_mat_to_vec(cpp):
+    """2-D → extract main diagonal"""
+    m = np.array([[1.0, 2.0, 3.0],
+                  [4.0, 5.0, 6.0],
+                  [7.0, 8.0, 9.0]])
+    assert_bit_aligned(cpp.diag(m), np.diag(m), "diag(mat,k=0)")
+
+@pytest.mark.parametrize("k", [-2, -1, 1, 2])
+def test_diag_mat_kdiag(k, cpp):
+    m = np.arange(16.0).reshape(4, 4)
+    assert_bit_aligned(cpp.diag(m, k), np.diag(m, k), f"diag(mat,k={k})")
+
+
+# ============================================================================
 # 8. Astype conversions
 # ============================================================================
 

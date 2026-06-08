@@ -59,8 +59,40 @@ PYBIND11_MODULE(numpycpp, m) {
     m.def("ones_like", static_cast<py::array(*)(const py::array&, const std::string&)>(&numpy::ones_like),
           py::arg("arr"), py::arg("dtype"));
     m.def("zeros", &numpy::zeros);
-    m.def("ones", &numpy::ones);
-	m.def("full", static_cast<py::array_t<double>(*)(const std::vector<py::ssize_t>&, double)>(&numpy::full));
+    m.def("ones",  &numpy::ones);
+    m.def("full",  static_cast<py::array_t<double>(*)(const std::vector<py::ssize_t>&, double)>(&numpy::full));
+    m.def("empty", static_cast<py::array_t<double>(*)(const std::vector<py::ssize_t>&)>(&numpy::empty));
+
+    // -- arange / linspace / logspace / geomspace --------------------------
+    // Single py::object dispatch: dtype inferred from input numpy scalar type
+    // (np.float32 → float32 output, Python float / np.float64 → float64 output)
+    // exactly mirroring numpy's own dtype inference behaviour.
+    m.def("arange",
+          static_cast<py::array(*)(py::object, py::object, py::object)>(&numpy::arange),
+          py::arg("a"), py::arg("b")=py::none(), py::arg("c")=py::none());
+    m.def("linspace",
+          static_cast<py::array(*)(py::object, py::object, py::ssize_t, bool)>(&numpy::linspace),
+          py::arg("start"), py::arg("stop"), py::arg("num")=50, py::arg("endpoint")=true);
+    m.def("logspace",
+          static_cast<py::array(*)(py::object, py::object, py::ssize_t, bool, double)>(&numpy::logspace),
+          py::arg("start"), py::arg("stop"), py::arg("num")=50, py::arg("endpoint")=true, py::arg("base")=10.0);
+    m.def("geomspace",
+          static_cast<py::array(*)(py::object, py::object, py::ssize_t, bool)>(&numpy::geomspace),
+          py::arg("start"), py::arg("stop"), py::arg("num")=50, py::arg("endpoint")=true);
+
+    // -- eye / identity / diag ---------------------------------------------
+    // eye / identity: scalar int arguments — dtype determined by registered order;
+    // float64 is numpy's default so register it last (wins for int args).
+    m.def("eye",      static_cast<py::array_t<float> (*)(py::ssize_t,py::ssize_t,int)>(&numpy::eye<float>),
+          py::arg("N"), py::arg("M")=-1, py::arg("k")=0);
+    m.def("eye",      static_cast<py::array_t<double>(*)(py::ssize_t,py::ssize_t,int)>(&numpy::eye),
+          py::arg("N"), py::arg("M")=-1, py::arg("k")=0);
+    m.def("identity", static_cast<py::array_t<float> (*)(py::ssize_t)>(&numpy::identity<float>));
+    m.def("identity", static_cast<py::array_t<double>(*)(py::ssize_t)>(&numpy::identity));
+    m.def("diag",     static_cast<py::array_t<float> (*)(const py::array_t<float>&, int)>(&numpy::diag<float>),
+          py::arg("v"), py::arg("k")=0);
+    m.def("diag",     static_cast<py::array_t<double>(*)(const py::array_t<double>&,int)>(&numpy::diag),
+          py::arg("v"), py::arg("k")=0);
 
     // -- astype ------------------------------------------------------------
     // NOTE: astype_int / astype_bool / astype_bool_from_int instead of a
