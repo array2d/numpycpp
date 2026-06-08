@@ -1,0 +1,42 @@
+@PACKAGE_INIT@
+
+# numpycpp -- header-only C++ numpy API library.
+#
+# Backend selection (set BEFORE find_package, or via cmake -D):
+#   cmake -DNUMPYCPP_STD_ONLY=OFF ..   # bitexact (default): SVML + OpenBLAS via dlsym
+#   cmake -DNUMPYCPP_STD_ONLY=ON  ..   # std: pure <cmath> + C++ loops, no dlsym
+#
+# The flag is propagated automatically to every target that links numpycpp:
+#   bitexact  → INTERFACE_LINK_LIBRARIES dl
+#   std       → INTERFACE_COMPILE_DEFINITIONS NUMPYCPP_STD_ONLY
+
+# Non-namespaced + namespaced alias.
+# pybind11_add_module users: if the :: target is lost during generation, use
+#   target_include_directories(mymod PRIVATE ${numpycpp_INCLUDE_DIRS})
+add_library(numpycpp INTERFACE IMPORTED)
+
+set_target_properties(numpycpp PROPERTIES
+    IMPORTED_GLOBAL TRUE
+    INTERFACE_COMPILE_FEATURES "cxx_std_17"
+    INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include/numpycpp"
+)
+
+add_library(numpycpp::numpycpp ALIAS numpycpp)
+
+# Propagate the correct backend flags to every consumer automatically.
+if(NUMPYCPP_STD_ONLY)
+    # std backend: no external dependencies
+    set_property(TARGET numpycpp APPEND PROPERTY
+        INTERFACE_COMPILE_DEFINITIONS NUMPYCPP_STD_ONLY)
+    message(STATUS "numpycpp: std backend (pure <cmath>, no dlsym)")
+else()
+    # bitexact backend (default): libdl needed for dlsym -> numpy .so at runtime
+    set_property(TARGET numpycpp APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES dl)
+    message(STATUS "numpycpp: bitexact backend (SVML + OpenBLAS via dlsym, -ldl)")
+endif()
+
+# Fallback variables (pybind11_add_module target-loss workaround)
+set(numpycpp_INCLUDE_DIRS "${PACKAGE_PREFIX_DIR}/include/numpycpp")
+
+check_required_components(numpycpp)
