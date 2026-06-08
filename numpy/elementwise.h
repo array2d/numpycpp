@@ -359,6 +359,58 @@ inline void truncate_to_float32(const double* src, double* dst, size_t n) {
 }
 
 // ============================================================================
+// Scalar (single-value) overloads
+//
+// Parallel to every array API but taking a single T and returning T.
+// Call site:  double r = numpy::sqrt(x);  float r = numpy::sin(x);
+//
+// Unary math — delegate to detail:: (SVML-bridge or std, same accuracy):
+//   sqrt  abs   exp   log   sin   cos   tan   cbrt  expm1 log1p
+//   log10 log2  arcsin arccos arctan round floor ceil degrees radians sign
+//
+// Binary — two scalars in, one scalar out:
+//   power(x,e)  hypot(x,y)  arctan2(y,x)  maximum(a,b)  minimum(a,b)
+//
+// Ternary: clip(x, lo, hi)
+// ============================================================================
+
+// ── Unary — route through the array API (inherits AVX-512 specialisations) ─
+
+template<typename T> inline T sqrt   (T x) { sqrt   (&x, &x, 1); return x; }
+template<typename T> inline T abs    (T x) { abs    (&x, &x, 1); return x; }
+template<typename T> inline T exp    (T x) { exp    (&x, &x, 1); return x; }
+template<typename T> inline T log    (T x) { log    (&x, &x, 1); return x; }
+template<typename T> inline T sin    (T x) { sin    (&x, &x, 1); return x; }
+template<typename T> inline T cos    (T x) { cos    (&x, &x, 1); return x; }
+template<typename T> inline T tan    (T x) { tan    (&x, &x, 1); return x; }
+template<typename T> inline T cbrt   (T x) { cbrt   (&x, &x, 1); return x; }
+template<typename T> inline T expm1  (T x) { expm1  (&x, &x, 1); return x; }
+template<typename T> inline T log1p  (T x) { log1p  (&x, &x, 1); return x; }
+template<typename T> inline T log10  (T x) { log10  (&x, &x, 1); return x; }
+template<typename T> inline T log2   (T x) { log2   (&x, &x, 1); return x; }
+template<typename T> inline T arcsin (T x) { arcsin (&x, &x, 1); return x; }
+template<typename T> inline T arccos (T x) { arccos (&x, &x, 1); return x; }
+template<typename T> inline T arctan (T x) { arctan (&x, &x, 1); return x; }
+template<typename T> inline T round  (T x) { round  (&x, &x, 1); return x; }
+template<typename T> inline T floor  (T x) { floor  (&x, &x, 1); return x; }
+template<typename T> inline T ceil   (T x) { ceil   (&x, &x, 1); return x; }
+template<typename T> inline T degrees(T x) { degrees(&x, &x, 1); return x; }
+template<typename T> inline T radians(T x) { radians(&x, &x, 1); return x; }
+template<typename T> inline T sign   (T x) { sign   (&x, &x, 1); return x; }
+
+// ── Binary ─────────────────────────────────────────────────────────────────
+
+template<typename T> inline T power  (T x, T e) { power(&x, &x, 1, e);    return x; }
+template<typename T> inline T hypot  (T x, T y) { T r; hypot  (&x,&y,&r,1); return r; }
+template<typename T> inline T arctan2(T y, T x) { T r; arctan2(&y,&x,&r,1); return r; }
+template<typename T> inline T maximum(T a, T b) { T r; maximum(&a,&b,&r,1); return r; }
+template<typename T> inline T minimum(T a, T b) { T r; minimum(&a,&b,&r,1); return r; }
+
+// ── Ternary ────────────────────────────────────────────────────────────────
+
+template<typename T> inline T clip(T x, T lo, T hi) { clip(&x, &x, 1, lo, hi); return x; }
+
+// ============================================================================
 // AVX-512 wide-loop template specialisations (0 ULP, ~8-16x faster)
 // Must appear inside namespace numpy after all primary templates.
 // Skipped in STD_ONLY mode (no SVML, no AVX-512 intrinsics needed).
