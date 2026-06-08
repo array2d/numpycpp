@@ -29,14 +29,20 @@
 #endif
 
 // ── Internal detail headers ──────────────────────────────────────────────────
-// linalg_backend.h selects the linalg implementation at compile time:
-//   NUMPYCPP_STD_ONLY not set → blas_bridge.h (bit-exact, OpenBLAS ILP64)
-//   NUMPYCPP_STD_ONLY     set → std_linalg_backend.h (pure loops, perf-first)
+// Backend selected at compile time:
+//   NUMPYCPP_STD_ONLY not defined (default):
+//     blas_bridge.h — bit-exact (OpenBLAS ILP64, dlsym)
+//   NUMPYCPP_STD_ONLY defined:
+//     std_linalg_backend.h — pure C++ loops, performance-first
 #ifndef NUMPYCPP_INTERNAL_INCLUDE
 #  define NUMPYCPP_INTERNAL_INCLUDE
 #  define _NUMPYCPP_LINALG_OWNS_GUARD
 #endif
-#include "detail/linalg_backend.h"
+#ifdef NUMPYCPP_STD_ONLY
+#  include "detail/std_linalg_backend.h"
+#else
+#  include "detail/blas_bridge.h"
+#endif
 #ifdef _NUMPYCPP_LINALG_OWNS_GUARD
 #  undef NUMPYCPP_INTERNAL_INCLUDE
 #  undef _NUMPYCPP_LINALG_OWNS_GUARD

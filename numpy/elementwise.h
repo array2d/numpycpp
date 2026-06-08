@@ -37,16 +37,23 @@
 #include <algorithm>
 
 // ── Internal detail headers ──────────────────────────────────────────────────
-// math_backend.h selects the math implementation at compile time:
-//   NUMPYCPP_STD_ONLY not set → svml_bridge.h (bit-exact, dlsym + SVML)
-//   NUMPYCPP_STD_ONLY     set → std_math_backend.h (pure <cmath>, perf-first)
+// Backend selected at compile time:
+//   NUMPYCPP_STD_ONLY not defined (default):
+//     svml_bridge.h + npy_math_float.h — bit-exact (dlsym + SVML + AVX-512)
+//   NUMPYCPP_STD_ONLY defined:
+//     std_math_backend.h — pure <cmath>, performance-first, no dlsym
 // avx512_loops.h provides AVX-512 specialisations; skipped in STD_ONLY mode.
 // Both require NUMPYCPP_INTERNAL_INCLUDE; we manage that here.
 #ifndef NUMPYCPP_INTERNAL_INCLUDE
 #  define NUMPYCPP_INTERNAL_INCLUDE
 #  define _NUMPYCPP_EW_OWNS_GUARD
 #endif
-#include "detail/math_backend.h"
+#ifdef NUMPYCPP_STD_ONLY
+#  include "detail/std_math_backend.h"
+#else
+#  include "detail/npy_math_float.h"
+#  include "detail/svml_bridge.h"
+#endif
 #include "detail/macros.h"   // NUMPY_UNROLL4
 
 namespace numpy {
