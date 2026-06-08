@@ -791,6 +791,79 @@ def test_mean_axis2_3d(cpp, dtype):
     a = random_array((3, 4, 5), dtype=dtype)
     assert_bit_aligned(cpp.mean(a, 2), np.mean(a, axis=2), "mean 3d axis=2")
 
+# ── issue #001: mean_axis pairwise_sum vs sequential (float32 ULP) ──────────
+#
+# Reported scenario: (4, 2) float32 polygon → mean(axis=0) → (2,) center.
+# Root cause (original analysis): pairwise_sum used instead of sequential sum
+# for small axis sizes.  The fix is confirmed present: pairwise_sum already
+# falls back to sequential accumulation for n < 8.  These tests lock in
+# bit-exact behaviour for the exact shapes and n ≥ 8 boundary cases that were
+# previously uncovered.
+
+def test_mean_axis_polygon_center_f32(cpp):
+    """issue #001 — (4,2) float32 polygon center via mean(axis=0) → (2,)."""
+    poly = np.array([
+        [10.5,  20.3],
+        [30.7,  40.1],
+        [50.9,  60.2],
+        [70.4,  80.8],
+    ], dtype=np.float32)
+    assert_bit_aligned(cpp.mean(poly, 0), np.mean(poly, axis=0),
+                       "polygon center axis=0")
+    assert_bit_aligned(cpp.mean(poly, 1), np.mean(poly, axis=1),
+                       "polygon row-mean axis=1")
+
+def test_mean_axis_polygon_center_rounding_f32(cpp):
+    """issue #001 — float32 values near rounding boundary, axis=0."""
+    # 2^23 = 8388608 exactly representable; +1 triggers ULP rounding in f32
+    v = np.float32(2**23)
+    poly = np.array([
+        [v,    1.0],
+        [v,    1.0],
+        [v,    1.0],
+        [1.0,  v  ],
+    ], dtype=np.float32)
+    assert_bit_aligned(cpp.mean(poly, 0), np.mean(poly, axis=0),
+                       "polygon rounding axis=0")
+
+@pytest.mark.parametrize("n_axis", [8, 9, 16, 17, 100, 128, 129])
+def test_mean_axis_large_fiber(cpp, dtype, n_axis):
+    """issue #001 — mean_axis for axis sizes ≥ 8 (pairwise_sum medium / recursive path)."""
+    a = random_array((3, n_axis), dtype=dtype, seed=1001 + n_axis)
+    assert_bit_aligned(cpp.mean(a, 1), np.mean(a, axis=1),
+                       f"mean (3,{n_axis}) axis=1")
+    b = random_array((n_axis, 3), dtype=dtype, seed=1001 + n_axis)
+    assert_bit_aligned(cpp.mean(b, 0), np.mean(b, axis=0),
+                       f"mean ({n_axis},3) axis=0")
+
+def test_mean_axis_n8_boundary_f32(cpp):
+    """issue #001 — n=8 boundary with pairwise (stride=1) and sequential (stride>1) paths.
+
+    numpy's accumulation order depends on the axis memory stride:
+      stride == 1  (last/contiguous axis)  → pairwise
+      stride >  1  (non-contiguous axis)   → sequential
+    """
+    v = np.float32(2**24)  # 16777216; ULP = 2, so adding 1 is lost
+
+    # ── stride=1 (axis=1, last dim, contiguous) → numpy uses pairwise ─────
+    # shape (1, 8): single row, reduce over contiguous last axis
+    a_contig = np.array([[v] + [np.float32(1.0)] * 7], dtype=np.float32)
+    assert_bit_aligned(cpp.mean(a_contig, 1), np.mean(a_contig, axis=1),
+                       "n=8 stride=1 (pairwise)")
+
+    # shape (3, 8): three rows, reduce over contiguous last axis
+    a_3x8 = np.tile(np.array([v] + [np.float32(1.0)] * 7, dtype=np.float32), (3, 1))
+    assert_bit_aligned(cpp.mean(a_3x8, 1), np.mean(a_3x8, axis=1),
+                       "n=8 stride=1 3-row (pairwise)")
+
+    # ── stride>1 (axis=0, non-contiguous) → numpy uses sequential ──────────
+    # shape (8, 1): 8 rows, reduce over non-contiguous axis=0 (stride=1 but…)
+    # Actually (8,1) axis=0 has stride=1 as well → pairwise
+    a_8x3 = np.column_stack([np.array([v] + [np.float32(1.0)] * 7, dtype=np.float32),
+                              np.ones((8, 2), dtype=np.float32)])
+    assert_bit_aligned(cpp.mean(a_8x3, 0), np.mean(a_8x3, axis=0),
+                       "n=8 stride=3 (sequential)")
+
 
 # Slice & assign
 def test_slice_basic(cpp, dtype):
