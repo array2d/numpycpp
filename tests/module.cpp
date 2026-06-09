@@ -4,12 +4,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "numpy/init_py.h"
-#include "numpy/elementwise_py.h"
-#include "numpy/reduce_py.h"
-#include "numpy/manipulation_py.h"
-#include "numpy/io_py.h"
-#include "numpy/linalg_py.h"
+#include "numpy/numpy_py.h"
 
 namespace py = pybind11;
 
