@@ -19,7 +19,7 @@
 //   np.linalg.norm(a) → sqrt(x.dot(x)) → same sdot_64_ / ddot_64_
 //
 // np.linalg.norm(a, axis=k) uses numpy's own pairwise sum — already
-// handled by norm_axis() in core.h, no BLAS needed.
+// handled by norm_axis() in linalg.h, no BLAS needed.
 //
 // The OpenBLAS library path is auto-discovered from /proc/self/maps
 // (numpy loads it when imported), so no compile-time link flag is needed.

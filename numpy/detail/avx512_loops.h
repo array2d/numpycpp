@@ -2,8 +2,8 @@
 // ║  INTERNAL HEADER — DIRECT INCLUSION IS A COMPILE ERROR                 ║
 // ║                                                                          ║
 // ║  This file contains AVX-512 template specializations that override the  ║
-// ║  generic loops in core.h.  It is x86_64 + AVX-512F specific and must   ║
-// ║  be included INSIDE namespace numpy at the end of core.h — nowhere else.║
+// ║  generic loops in elementwise.h.  It is x86_64 + AVX-512F specific and  ║
+// ║  be included INSIDE namespace numpy at end of elementwise.h — nowhere else.║
 // ║                                                                          ║
 // ║  ✗  #include "numpy/detail/avx512_loops.h"     ← compile error                ║
 // ║  ✓  #include "numpy/numpy.h"             ← recommended entry point      ║

@@ -1,4 +1,4 @@
-#include "numpy/core.h"
+#include "numpy/numpy.h"
 #include "numpy/linalg.h"
 #include <benchmark/benchmark.h>
 #include <vector>
