@@ -6,7 +6,7 @@
 // ║  be included INSIDE namespace numpy at end of elementwise.h — nowhere else.║
 // ║                                                                          ║
 // ║  ✗  #include "numpy/detail/avx512_loops.h"     ← compile error                ║
-// ║  ✓  #include "numpy/numpy.h"             ← recommended entry point      ║
+// ║  ✓  #include "numpycpp/numpy.h"             ← recommended entry point      ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // AVX-512 wide-loop specializations for array math functions.
@@ -29,7 +29,7 @@
 
 #ifndef NUMPYCPP_INTERNAL_INCLUDE
 #  error "avx512_loops.h is an internal header — do not include directly. \
-Use #include "numpy/numpy.h" instead."
+Use #include "numpycpp/numpy.h" instead."
 #endif
 
 #ifdef __AVX512F__

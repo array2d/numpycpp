@@ -1,4 +1,4 @@
-#include <numpy/numpy.h>
+#include <numpycpp/numpy.h>
 #include <iostream>
 #include <vector>
 

@@ -41,7 +41,7 @@ else()
 endif()
 
 # ---- Install — header-only C++ library --------------------------------------
-install(DIRECTORY numpy
+install(DIRECTORY numpycpp
     DESTINATION include/numpycpp
     FILES_MATCHING PATTERN "*.h"
     PATTERN ".pytest_cache" EXCLUDE

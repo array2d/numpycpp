@@ -1,5 +1,5 @@
-#include "numpy/numpy.h"
-#include "numpy/linalg.h"
+#include "numpycpp/numpy.h"
+#include "numpycpp/linalg.h"
 #include <benchmark/benchmark.h>
 #include <vector>
 #include <random>

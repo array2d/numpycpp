@@ -8,7 +8,7 @@
 // ║                                                                          ║
 // ║  ✗  #include "numpy/detail/svml_bridge.h"      ← compile error                ║
 // ║  ✗  numpy::detail::exp_svml_f64(x)      ← undefined behaviour          ║
-// ║  ✓  #include "numpy/numpy.h"             ← recommended entry point      ║
+// ║  ✓  #include "numpycpp/numpy.h"             ← recommended entry point      ║
 // ║  ✓  numpy::exp(src, dst, n)             ← public API                    ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
@@ -23,7 +23,7 @@
 
 #ifndef NUMPYCPP_INTERNAL_INCLUDE
 #  error "svml_bridge.h is an internal header — do not include directly. \
-Use #include "numpy/numpy.h" instead."
+Use #include "numpycpp/numpy.h" instead."
 #endif
 
 #include <cmath>

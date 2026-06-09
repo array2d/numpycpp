@@ -7,7 +7,7 @@
 // ║                                                                          ║
 // ║  ✗  #include "numpy/detail/blas_bridge.h"      ← compile error                ║
 // ║  ✗  numpy::detail::blas_sdot(...)       ← undefined behaviour          ║
-// ║  ✓  #include "numpy/numpy.h"             ← recommended entry point      ║
+// ║  ✓  #include "numpycpp/numpy.h"             ← recommended entry point      ║
 // ║  ✓  numpy::dot(a, b, n)                 ← public API                    ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
@@ -34,7 +34,7 @@
 
 #ifndef NUMPYCPP_INTERNAL_INCLUDE
 #  error "blas_bridge.h is an internal header — do not include directly. \
-Use #include "numpy/numpy.h" instead."
+Use #include "numpycpp/numpy.h" instead."
 #endif
 
 #include <cstdint>

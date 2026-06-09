@@ -4,7 +4,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "numpy/numpy_py.h"
+#include "numpycpp/numpy_py.h"
 
 namespace py = pybind11;
 

@@ -6,14 +6,14 @@
 // ║  subject to change without notice.                                       ║
 // ║                                                                          ║
 // ║  ✗  #include "numpy/detail/npy_math_float.h"   ← compile error                ║
-// ║  ✓  #include "numpy/numpy.h"            ← only correct entry point      ║
+// ║  ✓  #include "numpycpp/numpy.h"            ← only correct entry point      ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
 #pragma once
 
 #ifndef NUMPYCPP_INTERNAL_INCLUDE
 #  error "npy_math_float.h is an internal header — do not include directly. \
-Use #include \"numpy/numpy.h\" instead."
+Use #include \"numpycpp/numpy.h\" instead."
 #endif
 
 #include <cstdint>

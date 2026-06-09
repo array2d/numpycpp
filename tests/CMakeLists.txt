@@ -84,7 +84,6 @@ pybind11_add_module(numpycpp MODULE module.cpp)
 # Include the numpycpp header-only library (parent dir)
 target_include_directories(numpycpp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
-    ${CMAKE_CURRENT_SOURCE_DIR}/../pycpp
 )
 if(Eigen3_FOUND)
     target_include_directories(numpycpp PRIVATE ${EIGEN3_INCLUDE_DIR})

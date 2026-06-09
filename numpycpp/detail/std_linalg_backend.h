@@ -6,7 +6,7 @@
 // ║  but uses only C++ loops — no dlopen, no OpenBLAS, no Fortran ABI.     ║
 // ║                                                                          ║
 // ║  ✗  #include "numpy/detail/std_linalg_backend.h"  ← compile error      ║
-// ║  ✓  #include "numpy/numpy.h"                      ← entry point         ║
+// ║  ✓  #include "numpycpp/numpy.h"                      ← entry point         ║
 // ║  ✓  cmake … -DNUMPYCPP_STD_ONLY=ON               ← selects this backend║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
@@ -23,7 +23,7 @@
 
 #ifndef NUMPYCPP_INTERNAL_INCLUDE
 #  error "std_linalg_backend.h is an internal header — do not include directly. \
-Use #include \"numpy/numpy.h\" instead."
+Use #include \"numpycpp/numpy.h\" instead."
 #endif
 
 #include <cmath>
