@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 [![CMake](https://img.shields.io/badge/CMake-%3E%3D3.16-green.svg)](https://cmake.org/)
-[![Tests](https://img.shields.io/badge/tests-900%20bit--exact-brightgreen.svg)](tests/test_all.py)
+[![Tests](https://img.shields.io/badge/tests-961%20bit--exact-brightgreen.svg)](tests/test_all.py)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ## Background
@@ -17,7 +17,7 @@ We created `numpycpp` to keep NumPy's familiar usage patterns while letting C++ 
 
 `numpycpp` is a **header-only C++ library** implementing numpy's core API (`numpy.*`, `numpy.linalg.*`, `numpy.einsum`) with **bit-level precision alignment**. Raw pointer + size interface. Zero external dependencies — pure C++17 standard library.
 
-All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (900 tests, float64 + float32, including NaN passthrough, signed-zero, ±∞, domain-error cases, and advanced indexing).
+All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (961 tests, float64 + float32, including NaN passthrough, signed-zero, ±∞, domain-error cases, and advanced indexing).
 
 **Bit-exact math** is achieved by resolving numpy's own math functions from `_multiarray_umath.so` at runtime. The SVML bridge auto-detects your CPU and selects the same path numpy uses: AVX‑512 SVML (`__svml_exp8`) when available, or scalar `npy_exp`/`npy_log`/etc. otherwise. AVX‑512 intrinsics are isolated behind `__attribute__((target))` — the binary is safe on any x86_64 CPU (no SIGILL). Every transcendental function produces the exact same IEEE 754 bits as numpy on **all architectures**.
 
@@ -32,23 +32,22 @@ All APIs are tested against Python numpy under strict bit-level comparison: ever
 **Public headers** — include the umbrella or individual modules:
 
 ```cpp
-#include "numpy/numpy.h"          // ← single entry point (recommended)
+#include <numpycpp/numpy.h>          // ← single entry point (recommended)
 
 // or include only what you need:
-#include "numpy/init.h"           // zeros_like, ones_like, full
-#include "numpy/elementwise.h"    // sqrt, exp, sin, astype, …
-#include "numpy/reduce.h"         // sum, mean, std, var, cumsum, …
-#include "numpy/manipulation.h"   // transpose, take, slice, putmask, …
-#include "numpy/io.h"             // isin, interp, unwrap, …
-#include "numpy/linalg.h"         // dot, norm, matmul, einsum
+#include <numpycpp/init.h>           // zeros_like, ones_like, full, arange, …
+#include <numpycpp/elementwise.h>    // sqrt, exp, sin, astype, …
+#include <numpycpp/reduce.h>         // sum, mean, std, var, cumsum, …
+#include <numpycpp/manipulation.h>   // transpose, take, slice, putmask, …
+#include <numpycpp/io.h>             // isin, interp, unwrap, …
+#include <numpycpp/linalg.h>         // dot, norm, matmul, einsum
 ```
 
-> `numpy/detail/` headers are **internal** — automatically pulled in by the
-> public headers. Do not include them directly; a compile-time `#error` fires
-> if you try.
+> `numpycpp/detail/` headers are **internal** — automatically pulled in by the
+> public headers. Do not include them directly.
 >
-> Legacy single-file headers `numpy/core.h` and `numpy/einsum.h` are kept as
-> backward-compatible shims that simply `#include "numpy/numpy.h"`.
+> **pybind11 users** — include `<numpycpp/numpy_py.h>` instead to get the full
+> set of pybind11 wrapper functions (`numpy::sum(py::array_t<T>)` etc.).
 
 ```cpp
 std::vector<double> data = {1.0, 4.0, 9.0};
@@ -118,8 +117,7 @@ Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly
 
 The test suite verifies **bit-level precision alignment** between every C++ function and Python numpy.
 No tolerance, no `atol`/`rtol` — raw IEEE 754 bits must match exactly.
-900 tests: float64 + float32, including NaN passthrough, signed-zero, ±∞, domain errors, advanced indexing, and AVX-512 boundary sizes.
-In std mode ~399 precision-independent tests run (structural, reduction, manipulation, io, comparison, astype, advanced indexing).
+961 tests: float64 + float32, including NaN passthrough, signed-zero, ±∞, domain errors, advanced indexing, and AVX-512 boundary sizes.
 
 ```bash
 # build
@@ -157,7 +155,7 @@ cmake -DNUMPYCPP_STD_ONLY=ON  ..   # std / performance-first backend
 #### Compiler flags — bitexact backend (`NUMPYCPP_STD_ONLY=OFF`)
 
 The minimum set was determined empirically: each flag was removed in isolation
-and the full 900-test suite was re-run. Only flags whose removal caused at
+and the full 961-test suite was re-run. Only flags whose removal caused at
 least one test failure are marked **required**.
 
 ```cmake
@@ -251,41 +249,49 @@ Two backends, same API — choose with `cmake -DNUMPYCPP_STD_ONLY=ON/OFF`.
 
 ```
 numpycpp/
-├── numpy/                      # native C++ headers
-│   ├── numpy.h                 # [PUBLIC]   umbrella — #includes everything below
-│   ├── init.h                  # [PUBLIC]   zeros_like, ones_like, full
+├── numpycpp/                   # header-only library (all public + internal headers)
+│   ├── numpy.h                 # [PUBLIC]   umbrella — includes all core modules below
+│   ├── numpy_py.h              # [PUBLIC]   umbrella — includes all pybind11 wrappers below
+│   ├── init.h                  # [PUBLIC]   zeros_like, ones_like, full, arange, linspace, …
+│   ├── init_py.h               # [PUBLIC]   pybind11 wrappers for init.h
 │   ├── elementwise.h           # [PUBLIC]   sqrt/exp/sin/…, comparison, logical, astype
+│   ├── elementwise_py.h        # [PUBLIC]   pybind11 wrappers for elementwise.h
 │   ├── reduce.h                # [PUBLIC]   sum/mean/std/var/cumsum, axis reductions
+│   ├── reduce_py.h             # [PUBLIC]   pybind11 wrappers for reduce.h
 │   ├── manipulation.h          # [PUBLIC]   transpose/take/slice/put/putmask/argsort/…
-│   ├── io.h                    # [PUBLIC]   isin, interp, unwrap, safe_divide
+│   ├── manipulation_py.h       # [PUBLIC]   pybind11 wrappers for manipulation.h
+│   ├── io.h                    # [PUBLIC]   isin, interp, unwrap, safe_divide, …
+│   ├── io_py.h                 # [PUBLIC]   pybind11 wrappers for io.h
 │   ├── linalg.h                # [PUBLIC]   dot, norm, matmul, einsum
-│   ├── core.h                  # [SHIM]     backward-compat → #include "numpy.h"
-│   ├── einsum.h                # [SHIM]     backward-compat → #include "numpy.h"
-│   └── detail/                 # [INTERNAL] do not include directly — #error guard
+│   ├── linalg_py.h             # [PUBLIC]   pybind11 wrappers for linalg.h
+│   └── detail/                 # [INTERNAL] do not include directly
 │       ├── macros.h            #   NUMPY_UNROLL4, NUMPY_SMALL_STACK
-│       ├── math_backend.h      #   selector: STD_ONLY → std_math_backend, else svml_bridge
 │       ├── svml_bridge.h       #   bitexact: SVML / npy_* scalar math (dlsym)
 │       ├── std_math_backend.h  #   std: pure <cmath> std::exp/log/sin/… (no deps)
-│       ├── npy_math_float.h    #   bitexact: npy_* float32 wrappers
-│       ├── linalg_backend.h    #   selector: STD_ONLY → std_linalg_backend, else blas_bridge
 │       ├── blas_bridge.h       #   bitexact: OpenBLAS ILP64 cblas wrappers (dlsym)
 │       ├── std_linalg_backend.h#   std: pure C++ loop dot/gemm (no deps)
-│       └── avx512_loops.h      #   bitexact: AVX-512 vectorised exp/sin/cos loops
-├── pycpp/                      # pybind11 wrappers (optional)
-│   ├── pycpp.h                 # [PUBLIC]   umbrella — #includes everything below
-│   ├── init_py.h               # [PUBLIC]   zeros_like, ones_like, full
-│   ├── elementwise_py.h        # [PUBLIC]   sqrt/exp/sin/…, comparison, logical, astype
-│   ├── reduce_py.h             # [PUBLIC]   sum/mean/std/var/cumsum
-│   ├── manipulation_py.h       # [PUBLIC]   transpose/take/slice/put/putmask/…
-│   ├── io_py.h                 # [PUBLIC]   isin, interp, unwrap, asarray, …
-│   ├── linalg_py.h             # [PUBLIC]   dot, norm, matmul, einsum
-│   ├── core_py.h               # [SHIM]     backward-compat → #include "pycpp.h"
-│   └── einsum_py.h             # [SHIM]     backward-compat → #include "pycpp.h"
+│       ├── avx512_loops.h      #   bitexact: AVX-512 vectorised exp/sin/cos loops
+│       └── npy_math_float.h    #   bitexact: npy_* float32 wrappers
+├── bench/                      # performance benchmarks
+│   ├── CMakeLists.txt
+│   ├── bench_core.cpp          # C++ benchmark driver
+│   ├── bench.py                # pybind11-based benchmark runner
+│   └── bench_numpy.py          # pure-numpy baseline
 ├── tests/                      # bit-level precision tests + test module
 │   ├── module.cpp              # pybind11 module for testing
-│   ├── test_all.py             # single entry — all APIs, 900 tests, float64+float32
+│   ├── test_all.py             # single entry — all APIs, 961 tests, float64+float32
 │   ├── conftest.py             # silent-mode output suppression
+│   ├── make_csv.py             # ULP precision CSV generator
+│   ├── diagnose_numpy.py       # numpy internal diagnostic tool
+│   ├── ulp_precision.csv       # per-function ULP comparison data
 │   └── CMakeLists.txt          # test-module build
+├── example/                    # minimal usage examples
+│   ├── CMakeLists.txt
+│   └── main.cpp
+├── cmake/
+│   └── preinst                 # DEB pre-install script (clean old headers)
+├── issue/                      # issue tracking & root-cause analysis
+│   └── 001-mean_pairwise_sum_vs_sequential.md
 ├── CMakeLists.txt              # build & .deb packaging
 └── README.md
 ```
