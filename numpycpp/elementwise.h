@@ -9,7 +9,7 @@
 //      numpy.expm1   numpy.log1p   numpy.power   numpy.clip
 //      numpy.log10   numpy.log2    numpy.arcsin  numpy.arccos
 //      numpy.arctan  numpy.round   numpy.floor   numpy.ceil
-//      numpy.degrees numpy.radians numpy.sign
+//      numpy.degrees numpy.radians numpy.sign    numpy.reciprocal
 //
 //  Binary element-wise:
 //      numpy.hypot   numpy.arctan2  numpy.maximum  numpy.minimum
@@ -204,6 +204,14 @@ inline void sign(const T* src, T* dst, size_t n) {
                                                   : T((src[i] > T(0)) - (src[i] < T(0))));
 }
 
+/// numpy.reciprocal(x, /, out=None, *, where=True, ...)
+/// Returns 1/x element-wise.  IEEE 754 division handles edge cases:
+///   1/0 → ±∞, 1/±∞ → ±0, 1/NaN → NaN, -0 preservation.
+template<typename T>
+inline void reciprocal(const T* src, T* dst, size_t n) {
+    NUMPY_UNROLL4(i, dst[i] = T(1) / src[i]);
+}
+
 // ============================================================================
 // Binary element-wise — 2 arrays T in → T out
 // ============================================================================
@@ -366,7 +374,7 @@ inline void truncate_to_float32(const double* src, double* dst, size_t n) {
 //
 // Unary math — delegate to detail:: (SVML-bridge or std, same accuracy):
 //   sqrt  abs   exp   log   sin   cos   tan   cbrt  expm1 log1p
-//   log10 log2  arcsin arccos arctan round floor ceil degrees radians sign
+//   log10 log2  arcsin arccos arctan round floor ceil degrees radians sign reciprocal
 //
 // Binary — two scalars in, one scalar out:
 //   power(x,e)  hypot(x,y)  arctan2(y,x)  maximum(a,b)  minimum(a,b)
@@ -397,6 +405,7 @@ template<typename T> inline T ceil   (T x) { ceil   (&x, &x, 1); return x; }
 template<typename T> inline T degrees(T x) { degrees(&x, &x, 1); return x; }
 template<typename T> inline T radians(T x) { radians(&x, &x, 1); return x; }
 template<typename T> inline T sign   (T x) { sign   (&x, &x, 1); return x; }
+template<typename T> inline T reciprocal(T x) { reciprocal(&x, &x, 1); return x; }
 
 // ── Binary ─────────────────────────────────────────────────────────────────
 

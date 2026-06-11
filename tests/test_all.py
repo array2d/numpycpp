@@ -1651,6 +1651,42 @@ def test_sign_zero_signs(cpp):
         assert_bit_aligned(cpp.sign(a), np.sign(a), f"sign(±0) {dt.__name__}")
 
 
+# --- reciprocal (1/x) ---
+
+def test_reciprocal_basic(cpp, dtype):
+    """reciprocal(1/x) — basic values bit-exact vs numpy."""
+    a = random_array((128,), dtype=dtype)
+    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), f"reciprocal {dtype.__name__}")
+
+def test_reciprocal_zero_f32(cpp):
+    """1/0 → +inf, 1/−0 → −inf, 1/inf → 0, 1/−inf → −0."""
+    a = np.array([0.0, -0.0, np.inf, -np.inf], dtype=np.float32)
+    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), "reciprocal edges f32")
+
+def test_reciprocal_zero_f64(cpp):
+    """1/0 → +inf, 1/−0 → −inf, 1/inf → 0, 1/−inf → −0."""
+    a = np.array([0.0, -0.0, np.inf, -np.inf], dtype=np.float64)
+    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), "reciprocal edges f64")
+
+def test_reciprocal_nan(cpp):
+    """1/NaN → NaN."""
+    a = np.array([np.nan], dtype=np.float32)
+    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), "reciprocal nan f32")
+
+def test_reciprocal_special_values(cpp, dtype):
+    """reciprocal preserves special values: ±inf, ±0, NaN passthrough."""
+    if dtype == np.float64:
+        a = np.array([0.0, -0.0, 1.0, -1.0, 2.0, np.inf, -np.inf, np.nan], dtype=dtype)
+    else:
+        a = np.array([0.0, -0.0, 1.0, -1.0, 2.0, np.inf, -np.inf, np.nan], dtype=dtype)
+    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), f"reciprocal special {dtype.__name__}")
+
+def test_reciprocal_random(cpp, dtype):
+    """reciprocal large random arrays — bit-identical to numpy."""
+    a = random_array((1024,), dtype=dtype)
+    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), f"reciprocal large {dtype.__name__}")
+
+
 # --- unwrap NaN propagation ---
 
 def test_unwrap_nan_propagation(cpp):

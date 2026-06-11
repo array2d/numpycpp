@@ -3,7 +3,7 @@
 //  Pybind11 wrappers: element-wise operations and type conversion.
 //      Unary: sqrt abs exp log sin cos tan cbrt expm1 log1p log10 log2
 //             arcsin arccos arctan round floor ceil degrees radians sign
-//             power clip
+//             reciprocal power clip
 //      Binary: hypot arctan2 maximum minimum
 //      Comparison: greater less equal greater_equal less_equal not_equal
 //      Logical: logical_and logical_or logical_not logical_xor
@@ -57,6 +57,7 @@ DEF_ELEMWISE(ceil)
 DEF_ELEMWISE(degrees)
 DEF_ELEMWISE(radians)
 DEF_ELEMWISE(sign)
+DEF_ELEMWISE(reciprocal)
 #undef DEF_ELEMWISE
 
 /// numpy.power(x1, x2) — scalar exponent

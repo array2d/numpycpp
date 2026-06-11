@@ -110,6 +110,7 @@ PYBIND11_MODULE(numpycpp, m) {
     BIND_F1(log10); BIND_F1(log2); BIND_F1(arcsin); BIND_F1(arccos); BIND_F1(arctan);
     BIND_F1(round); BIND_F1(floor); BIND_F1(ceil);
     BIND_F1(degrees); BIND_F1(radians); BIND_F1(sign);
+    BIND_F1(reciprocal);
     m.def("power", static_cast<py::array_t<float>(*)(const py::array_t<float>&, float)>(&numpy::power));
     m.def("power", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double)>(&numpy::power));
     m.def("clip", static_cast<py::array_t<double>(*)(const py::array_t<double>&, double, double)>(&numpy::clip));

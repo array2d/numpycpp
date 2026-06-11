@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 [![CMake](https://img.shields.io/badge/CMake-%3E%3D3.16-green.svg)](https://cmake.org/)
-[![Tests](https://img.shields.io/badge/tests-961%20bit--exact-brightgreen.svg)](tests/test_all.py)
+[![Tests](https://img.shields.io/badge/tests-970%20bit--exact-brightgreen.svg)](tests/test_all.py)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ## Background
@@ -17,7 +17,7 @@ We created `numpycpp` to keep NumPy's familiar usage patterns while letting C++ 
 
 `numpycpp` is a **header-only C++ library** implementing numpy's core API (`numpy.*`, `numpy.linalg.*`, `numpy.einsum`) with **bit-level precision alignment**. Raw pointer + size interface. Zero external dependencies — pure C++17 standard library.
 
-All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (961 tests, float64 + float32, including NaN passthrough, signed-zero, ±∞, domain-error cases, and advanced indexing).
+All APIs are tested against Python numpy under strict bit-level comparison: every IEEE 754 float bit must match exactly (970 tests, float64 + float32, including NaN passthrough, signed-zero, ±∞, domain-error cases, and advanced indexing).
 
 **Bit-exact math** is achieved by resolving numpy's own math functions from `_multiarray_umath.so` at runtime. The SVML bridge auto-detects your CPU and selects the same path numpy uses: AVX‑512 SVML (`__svml_exp8`) when available, or scalar `npy_exp`/`npy_log`/etc. otherwise. AVX‑512 intrinsics are isolated behind `__attribute__((target))` — the binary is safe on any x86_64 CPU (no SIGILL). Every transcendental function produces the exact same IEEE 754 bits as numpy on **all architectures**.
 
@@ -117,7 +117,7 @@ Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly
 
 The test suite verifies **bit-level precision alignment** between every C++ function and Python numpy.
 No tolerance, no `atol`/`rtol` — raw IEEE 754 bits must match exactly.
-961 tests: float64 + float32, including NaN passthrough, signed-zero, ±∞, domain errors, advanced indexing, and AVX-512 boundary sizes.
+970 tests: float64 + float32, including NaN passthrough, signed-zero, ±∞, domain errors, advanced indexing, and AVX-512 boundary sizes.
 
 ```bash
 # build
@@ -155,7 +155,7 @@ cmake -DNUMPYCPP_STD_ONLY=ON  ..   # std / performance-first backend
 #### Compiler flags — bitexact backend (`NUMPYCPP_STD_ONLY=OFF`)
 
 The minimum set was determined empirically: each flag was removed in isolation
-and the full 961-test suite was re-run. Only flags whose removal caused at
+and the full 970-test suite was re-run. Only flags whose removal caused at
 least one test failure are marked **required**.
 
 ```cmake
@@ -279,7 +279,7 @@ numpycpp/
 │   └── bench_numpy.py          # pure-numpy baseline
 ├── tests/                      # bit-level precision tests + test module
 │   ├── module.cpp              # pybind11 module for testing
-│   ├── test_all.py             # single entry — all APIs, 961 tests, float64+float32
+│   ├── test_all.py             # single entry — all APIs, 970 tests, float64+float32
 │   ├── conftest.py             # silent-mode output suppression
 │   ├── make_csv.py             # ULP precision CSV generator
 │   ├── diagnose_numpy.py       # numpy internal diagnostic tool
