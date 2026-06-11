@@ -99,11 +99,17 @@ inline void norm_axis(const T* src, T* dst,
 /// numpy.linalg.inv(a) — matrix inverse (square N×N)
 /// Uses DGESV (bitexact) or Gauss-Jordan (std backend).
 /// Returns true on success; false if matrix is singular or LAPACK unavailable.
+/// On failure, A_inv is zeroed (caller MUST check the return value).
 template<typename T>
 inline bool inv(const T* A, T* A_inv, size_t N) {
-    // Copy input to output buffer (inv modifies in-place)
+    // Copy input to output buffer (blas_ops::inv modifies in-place)
     for (size_t i = 0; i < N * N; ++i) A_inv[i] = A[i];
     bool ok = numpy::detail::blas_ops<T>::inv(A_inv, N);
+    if (!ok) {
+        // Zero output on failure — prevents the caller from reading
+        // the unmodified copy of A as if it were the inverse.
+        for (size_t i = 0; i < N * N; ++i) A_inv[i] = T(0);
+    }
     return ok;
 }
 
