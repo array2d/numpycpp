@@ -40,6 +40,7 @@ Use #include "numpycpp/numpy.h" instead."
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <memory>
 #include <dlfcn.h>
 #include <fstream>
 #include <string>
