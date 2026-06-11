@@ -46,6 +46,8 @@ PYBIND11_MODULE(numpycpp, m) {
     la.def("norm", static_cast<double(*)(const py::array_t<double>&)>(&numpy::linalg::norm));
     la.def("norm", static_cast<py::array_t<float>(*)(const py::array_t<float>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
     la.def("norm", static_cast<py::array_t<double>(*)(const py::array_t<double>&, int)>(&numpy::linalg::norm), py::arg("arr"), py::arg("axis") = -1);
+    la.def("inv", static_cast<py::array_t<float>(*)(const py::array_t<float>&)>(&numpy::linalg::inv));
+    la.def("inv", static_cast<py::array_t<double>(*)(const py::array_t<double>&)>(&numpy::linalg::inv));
 
     // -- Array creation ----------------------------------------------------
     BIND_F1(zeros_like); BIND_F1(ones_like); BIND_F1(empty_like);

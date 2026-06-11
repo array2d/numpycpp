@@ -18,6 +18,24 @@ T norm(const py::array_t<T>& arr) {
     return norm(static_cast<const T*>(buf.ptr), buf.size);
 }
 
+/// numpy.linalg.inv(a) — matrix inverse
+template<typename T>
+py::array_t<T> inv(const py::array_t<T>& arr) {
+    auto buf = arr.request();
+    if (buf.ndim != 2)
+        throw std::invalid_argument("linalg.inv: expected 2-D array, got " +
+                                    std::to_string(buf.ndim) + "-D");
+    size_t N = static_cast<size_t>(buf.shape[0]);
+    if (buf.shape[1] != static_cast<py::ssize_t>(N))
+        throw std::invalid_argument("linalg.inv: expected square matrix");
+    py::array_t<T> result(buf.shape);
+    bool ok = numpy::linalg::inv(static_cast<const T*>(buf.ptr),
+                                  static_cast<T*>(result.request().ptr), N);
+    if (!ok)
+        throw std::runtime_error("linalg.inv: singular matrix or LAPACK unavailable");
+    return result;
+}
+
 /// numpy.linalg.norm(x, ord=None, axis=N, keepdims=False) — N-D with axis
 template<typename T>
 py::array_t<T> norm(const py::array_t<T>& arr, int axis = -1) {

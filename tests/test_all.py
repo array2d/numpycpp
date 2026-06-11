@@ -1240,6 +1240,67 @@ def test_norm_1d_fallback(cpp, dtype):
     py_r = np.float64(np.linalg.norm(a))
     assert cpp_r == py_r, f"norm 1d fallback: {cpp_r} vs {py_r}"
 
+# --- linalg.inv ---
+
+def test_inv_identity(cpp, dtype):
+    """inv(I) = I."""
+    a = np.eye(4, dtype=dtype)
+    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), f"inv(eye) {dtype.__name__}")
+
+def test_inv_diag(cpp, dtype):
+    """inv(diag) = diag(1/d)."""
+    a = np.diag(np.array([2.0, 3.0, 4.0], dtype=dtype))
+    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), f"inv(diag) {dtype.__name__}")
+
+def test_inv_2x2(cpp):
+    """inv([[1,2],[3,4]]) = [[-2,1],[1.5,-0.5]]."""
+    a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), "inv(2x2) f64")
+
+def test_inv_random_correctness(cpp, dtype):
+    """inv(A) @ A ≈ I for random 4×4."""
+    a = random_array((4, 4), dtype=dtype)
+    a_inv = cpp.linalg.inv(a)
+    # Verify A @ A_inv ≈ I
+    prod = cpp.matmul(a_inv, a)
+    eye = np.eye(4, dtype=dtype)
+    np.testing.assert_allclose(
+        np.asarray(prod), eye,
+        rtol=0, atol=dtype(2e-6),
+        err_msg=f"inv * A != I ({dtype.__name__})"
+    )
+
+def test_inv_random_3x3_correctness(cpp, dtype):
+    """inv(A) @ A ≈ I for random 3×3."""
+    a = random_array((3, 3), dtype=dtype)
+    a_inv = cpp.linalg.inv(a)
+    prod = cpp.matmul(a_inv, a)
+    eye = np.eye(3, dtype=dtype)
+    np.testing.assert_allclose(
+        np.asarray(prod), eye,
+        rtol=0, atol=dtype(2e-6),
+        err_msg=f"inv(3x3) * A != I ({dtype.__name__})"
+    )
+
+def test_inv_singular(cpp):
+    """inv(singular) — numpy raises LinAlgError."""
+    import pytest as _pytest
+    a = np.array([[1.0, 2.0], [2.0, 4.0]], dtype=np.float64)
+    with _pytest.raises(RuntimeError):
+        cpp.linalg.inv(a)
+
+def test_inv_random_8x8_correctness(cpp):
+    """inv(A) @ A ≈ I for random 8×8 float64."""
+    a = random_array((8, 8), dtype=np.float64, seed=42)
+    a_inv = cpp.linalg.inv(a)
+    prod = cpp.matmul(a_inv, a)
+    eye = np.eye(8, dtype=np.float64)
+    np.testing.assert_allclose(
+        np.asarray(prod), eye,
+        rtol=0, atol=1e-12,
+        err_msg="inv(8x8) * A != I (f64)"
+    )
+
 def test_dot(cpp, dtype):
     a = random_array((5,), dtype=dtype)
     b = random_array((5,), seed=99, dtype=dtype)

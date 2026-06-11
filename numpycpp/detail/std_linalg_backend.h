@@ -97,6 +97,59 @@ inline void std_dgemm(const double* A, const double* B, double* C,
 }
 
 // ============================================================================
+// Matrix inverse — Gauss-Jordan elimination with partial pivoting
+// (std backend fallback when LAPACK not available)
+// ============================================================================
+// Augments [A | I], eliminates to [I | A⁻¹], then extracts RHS.
+// Returns true on success, false if matrix is singular (pivot too small).
+
+template<typename T>
+inline bool std_inv(T* A, size_t N) {
+    // Augmented matrix [A | I] stored row-major: rows of 2N elements
+    auto aug = std::make_unique<T[]>(N * 2 * N);
+    for (size_t i = 0; i < N; ++i) {
+        for (size_t j = 0; j < N; ++j) aug[i*2*N + j] = A[i*N + j];
+        for (size_t j = 0; j < N; ++j) aug[i*2*N + N + j] = T(i == j);
+    }
+
+    for (size_t col = 0; col < N; ++col) {
+        // Partial pivoting: find row with max |value| in this column
+        size_t pivot_row = col;
+        T max_val = std::abs(aug[col*2*N + col]);
+        for (size_t row = col + 1; row < N; ++row) {
+            T v = std::abs(aug[row*2*N + col]);
+            if (v > max_val) { max_val = v; pivot_row = row; }
+        }
+        if (max_val < T(1e-30)) return false;  // singular
+
+        // Swap rows if needed
+        if (pivot_row != col) {
+            for (size_t j = 0; j < 2 * N; ++j)
+                std::swap(aug[col*2*N + j], aug[pivot_row*2*N + j]);
+        }
+
+        // Normalise pivot row
+        T pivot = aug[col*2*N + col];
+        for (size_t j = 0; j < 2 * N; ++j)
+            aug[col*2*N + j] /= pivot;
+
+        // Eliminate all other rows
+        for (size_t row = 0; row < N; ++row) {
+            if (row == col) continue;
+            T factor = aug[row*2*N + col];
+            for (size_t j = 0; j < 2 * N; ++j)
+                aug[row*2*N + j] -= factor * aug[col*2*N + j];
+        }
+    }
+
+    // Extract inverse from augmented RHS
+    for (size_t i = 0; i < N; ++i)
+        for (size_t j = 0; j < N; ++j)
+            A[i*N + j] = aug[i*2*N + N + j];
+    return true;
+}
+
+// ============================================================================
 // blas_ops<T> — same template interface as blas_bridge.h.
 // linalg.h calls numpy::detail::blas_ops<T>::dot/norm/gemm/gemv/gemvt.
 // ============================================================================
@@ -122,6 +175,9 @@ template<> struct blas_ops<float> {
                       size_t K, size_t N) {
         std_sgemv_t(B, a, y, K, N);
     }
+    static bool inv  (float* A, size_t N) {
+        return std_inv(A, N);
+    }
 };
 
 template<> struct blas_ops<double> {
@@ -142,6 +198,9 @@ template<> struct blas_ops<double> {
     static void gemvt(const double* B, const double* a, double* y,
                       size_t K, size_t N) {
         std_dgemv_t(B, a, y, K, N);
+    }
+    static bool inv  (double* A, size_t N) {
+        return std_inv(A, N);
     }
 };
 

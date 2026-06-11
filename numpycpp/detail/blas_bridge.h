@@ -232,6 +232,49 @@ inline void blas_dgemm(const double* A, const double* B, double* C,
         }
 }
 
+// ============================================================================
+// LAPACK — LU factorisation + matrix inverse (numpy.linalg.inv)
+// ============================================================================
+// numpy.linalg.inv uses LAPACKE (C interface) routing through OpenBLAS ILP64.
+// LAPACKE internally handles row→column conversion and workspace allocation,
+// producing the exact same floating-point rounding path as numpy.
+//
+// LAPACKE function signatures (ILP64, return info as int64_t):
+//   LAPACKE_sgetrf64_(layout, m, n, a, lda, ipiv)
+//   LAPACKE_sgetri64_(layout, n, a, lda, ipiv)
+// layout = 101 (LAPACK_ROW_MAJOR)
+
+using LAPACKE_sgetrf64_fn = int64_t(int, int64_t, int64_t, float*,  int64_t, int64_t*);
+using LAPACKE_dgetrf64_fn = int64_t(int, int64_t, int64_t, double*, int64_t, int64_t*);
+using LAPACKE_sgetri64_fn = int64_t(int, int64_t, float*,  int64_t, const int64_t*);
+using LAPACKE_dgetri64_fn = int64_t(int, int64_t, double*, int64_t, const int64_t*);
+
+/// LAPACKE-based matrix inverse (C interface, RowMajor).
+/// Uses ?getrf (LU factorisation) + ?getri (inverse from LU).
+/// Matches numpy.linalg.inv exactly — same LAPACKE path, same ILP64 ABI.
+inline bool blas_sinv(float* A, size_t N) {
+    static auto getrf = (LAPACKE_sgetrf64_fn*)resolve_blas("LAPACKE_sgetrf64_");
+    static auto getri = (LAPACKE_sgetri64_fn*)resolve_blas("LAPACKE_sgetri64_");
+    if (__builtin_expect(getrf == nullptr || getri == nullptr, 0)) return false;
+    int64_t n = static_cast<int64_t>(N);
+    auto ipiv = std::make_unique<int64_t[]>(N);
+    int64_t info = getrf(101, n, n, A, n, ipiv.get());
+    if (info != 0) return false;
+    info = getri(101, n, A, n, ipiv.get());
+    return info == 0;
+}
+inline bool blas_dinv(double* A, size_t N) {
+    static auto getrf = (LAPACKE_dgetrf64_fn*)resolve_blas("LAPACKE_dgetrf64_");
+    static auto getri = (LAPACKE_dgetri64_fn*)resolve_blas("LAPACKE_dgetri64_");
+    if (__builtin_expect(getrf == nullptr || getri == nullptr, 0)) return false;
+    int64_t n = static_cast<int64_t>(N);
+    auto ipiv = std::make_unique<int64_t[]>(N);
+    int64_t info = getrf(101, n, n, A, n, ipiv.get());
+    if (info != 0) return false;
+    info = getri(101, n, A, n, ipiv.get());
+    return info == 0;
+}
+
 // Template dispatcher
 template<typename T> struct blas_ops;
 
@@ -246,6 +289,8 @@ template<> struct blas_ops<float> {
     // y[N] = B^T @ a[K]   (1D × 2D case)
     static void  gemvt(const float*  B, const float*  a, float*  y,
                        size_t K, size_t N) { blas_sgemv_t(B, a, y, K, N); }
+    // A_inv[N×N] = inv(A[N×N]) — in-place, returns true on success
+    static bool  inv  (float* A, size_t N) { return blas_sinv(A, N); }
 };
 template<> struct blas_ops<double> {
     static double dot  (const double* x, const double* y, size_t n) { return blas_ddot(x, y, n); }
@@ -256,6 +301,7 @@ template<> struct blas_ops<double> {
                         size_t M, size_t K) { blas_dgemv(A, x, y, M, K); }
     static void   gemvt(const double* B, const double* a, double* y,
                         size_t K, size_t N) { blas_dgemv_t(B, a, y, K, N); }
+    static bool   inv  (double* A, size_t N) { return blas_dinv(A, N); }
 };
 
 } // namespace detail
