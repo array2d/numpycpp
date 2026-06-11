@@ -73,6 +73,8 @@ inline const char* find_openblas_path() {
             }
         }
     }
+    // If not found yet, allow retry on next call (OpenBLAS may be loaded later)
+    if (path.empty()) tried = false;
     return path.empty() ? nullptr : path.c_str();
 }
 
@@ -106,7 +108,8 @@ using cblas_dgemm64_fn = void(int, int, int,
                                double,       double*, int64_t);
 
 inline float blas_sdot(const float* x, const float* y, size_t n) {
-    static auto fn = (sdot64_fn*)resolve_blas("sdot_64_");
+    static sdot64_fn* fn = nullptr;
+    if (!fn) fn = (sdot64_fn*)resolve_blas("sdot_64_");
     if (__builtin_expect(fn != nullptr, 1)) {
         const int64_t ni = static_cast<int64_t>(n), inc = 1;
         return fn(&ni, x, &inc, y, &inc);
@@ -118,7 +121,8 @@ inline float blas_sdot(const float* x, const float* y, size_t n) {
 }
 
 inline double blas_ddot(const double* x, const double* y, size_t n) {
-    static auto fn = (ddot64_fn*)resolve_blas("ddot_64_");
+    static ddot64_fn* fn = nullptr;
+    if (!fn) fn = (ddot64_fn*)resolve_blas("ddot_64_");
     if (__builtin_expect(fn != nullptr, 1)) {
         const int64_t ni = static_cast<int64_t>(n), inc = 1;
         return fn(&ni, x, &inc, y, &inc);
@@ -141,7 +145,8 @@ using cblas_dgemv64_fn = void(int, int, int64_t, int64_t,
 
 // y[M] = A[M×K] @ x[K]  — 2D × 1D case
 inline void blas_sgemv(const float* A, const float* x, float* y, size_t M, size_t K) {
-    static auto fn = (cblas_sgemv64_fn*)resolve_blas("cblas_sgemv64_");
+    static cblas_sgemv64_fn* fn = nullptr;
+    if (!fn) fn = (cblas_sgemv64_fn*)resolve_blas("cblas_sgemv64_");
     if (__builtin_expect(fn != nullptr, 1)) {
         fn(101, 111, (int64_t)M, (int64_t)K, 1.0f, A, (int64_t)K,
                                               x, 1, 0.0f, y, 1);
@@ -154,7 +159,8 @@ inline void blas_sgemv(const float* A, const float* x, float* y, size_t M, size_
     }
 }
 inline void blas_dgemv(const double* A, const double* x, double* y, size_t M, size_t K) {
-    static auto fn = (cblas_dgemv64_fn*)resolve_blas("cblas_dgemv64_");
+    static cblas_dgemv64_fn* fn = nullptr;
+    if (!fn) fn = (cblas_dgemv64_fn*)resolve_blas("cblas_dgemv64_");
     if (__builtin_expect(fn != nullptr, 1)) {
         fn(101, 111, (int64_t)M, (int64_t)K, 1.0, A, (int64_t)K,
                                               x, 1, 0.0, y, 1);
@@ -169,7 +175,8 @@ inline void blas_dgemv(const double* A, const double* x, double* y, size_t M, si
 
 // y[N] = B^T[K×N] @ a[K]  — 1D × 2D case (Trans=112)
 inline void blas_sgemv_t(const float* B, const float* a, float* y, size_t K, size_t N) {
-    static auto fn = (cblas_sgemv64_fn*)resolve_blas("cblas_sgemv64_");
+    static cblas_sgemv64_fn* fn = nullptr;
+    if (!fn) fn = (cblas_sgemv64_fn*)resolve_blas("cblas_sgemv64_");
     if (__builtin_expect(fn != nullptr, 1)) {
         fn(101, 112, (int64_t)K, (int64_t)N, 1.0f, B, (int64_t)N,
                                               a, 1, 0.0f, y, 1);
@@ -182,7 +189,8 @@ inline void blas_sgemv_t(const float* B, const float* a, float* y, size_t K, siz
     }
 }
 inline void blas_dgemv_t(const double* B, const double* a, double* y, size_t K, size_t N) {
-    static auto fn = (cblas_dgemv64_fn*)resolve_blas("cblas_dgemv64_");
+    static cblas_dgemv64_fn* fn = nullptr;
+    if (!fn) fn = (cblas_dgemv64_fn*)resolve_blas("cblas_dgemv64_");
     if (__builtin_expect(fn != nullptr, 1)) {
         fn(101, 112, (int64_t)K, (int64_t)N, 1.0, B, (int64_t)N,
                                               a, 1, 0.0, y, 1);
@@ -199,7 +207,8 @@ inline void blas_dgemv_t(const double* B, const double* a, double* y, size_t K, 
 // Uses cblas_sgemm64_ — same kernel numpy.matmul calls → 0 ULP by construction.
 inline void blas_sgemm(const float* A, const float* B, float* C,
                        size_t M, size_t K, size_t N) {
-    static auto fn = (cblas_sgemm64_fn*)resolve_blas("cblas_sgemm64_");
+    static cblas_sgemm64_fn* fn = nullptr;
+    if (!fn) fn = (cblas_sgemm64_fn*)resolve_blas("cblas_sgemm64_");
     if (__builtin_expect(fn != nullptr, 1)) {
         fn(101, 111, 111,                        // RowMajor, NoTrans, NoTrans
            (int64_t)M, (int64_t)N, (int64_t)K,
@@ -218,7 +227,8 @@ inline void blas_sgemm(const float* A, const float* B, float* C,
 
 inline void blas_dgemm(const double* A, const double* B, double* C,
                        size_t M, size_t K, size_t N) {
-    static auto fn = (cblas_dgemm64_fn*)resolve_blas("cblas_dgemm64_");
+    static cblas_dgemm64_fn* fn = nullptr;
+    if (!fn) fn = (cblas_dgemm64_fn*)resolve_blas("cblas_dgemm64_");
     if (__builtin_expect(fn != nullptr, 1)) {
         fn(101, 111, 111,
            (int64_t)M, (int64_t)N, (int64_t)K,
@@ -261,7 +271,8 @@ template<> inline bool blas_gesv_inv<float>(float* A, size_t N) {
     //   float32 → float64 → dgesv → float32
     // (OpenBLAS sgesv_64_ gives 1-ULP-off results vs numpy on this build;
     //  the float64 path is bit-identical for both types.)
-    static auto gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
+    static dgesv64_fn* gesv = nullptr;
+    if (!gesv) gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
     if (__builtin_expect(gesv == nullptr, 0)) return false;
     int64_t n = static_cast<int64_t>(N);
     auto ipiv = std::make_unique<int64_t[]>(N);
@@ -287,7 +298,8 @@ template<> inline bool blas_gesv_inv<float>(float* A, size_t N) {
 }
 
 template<> inline bool blas_gesv_inv<double>(double* A, size_t N) {
-    static auto gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
+    static dgesv64_fn* gesv = nullptr;
+    if (!gesv) gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
     if (__builtin_expect(gesv == nullptr, 0)) return false;
     int64_t n = static_cast<int64_t>(N);
     auto ipiv = std::make_unique<int64_t[]>(N);
