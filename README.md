@@ -230,6 +230,7 @@ Two backends, same API — choose with `cmake -DNUMPYCPP_STD_ONLY=ON/OFF`.
 | **Norm** | `numpy.linalg.norm` (scalar + axis) | ✅ | 〜 0–1 ULP |
 | **Matmul** | `numpy.matmul` (2-D, 1-D×2-D, 2-D×1-D, batched 3-D) | ✅ | 〜 0–2 ULP |
 | **Einsum** | `ij,ij→i` `ij,jk→ik` `bij,bjk→bik` and all 2-operand patterns | ✅ | 〜 0–2 ULP |
+| **Matrix inverse** | `numpy.linalg.inv` (N×N) | ✅ | 〜 0–2 ULP |
 
 > **bitexact backend**: transcendentals resolved via `dlsym` from numpy's
 > `_multiarray_umath.so` — same `npy_exp`/`npy_log` kernels numpy uses, with

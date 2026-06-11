@@ -1257,30 +1257,15 @@ def test_inv_2x2(cpp):
     a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
     assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), "inv(2x2) f64")
 
-def test_inv_random_correctness(cpp, dtype):
-    """inv(A) @ A ≈ I for random 4×4."""
+def test_inv_random(cpp, dtype):
+    """inv(A) bit-identical to numpy for random 4×4."""
     a = random_array((4, 4), dtype=dtype)
-    a_inv = cpp.linalg.inv(a)
-    # Verify A @ A_inv ≈ I
-    prod = cpp.matmul(a_inv, a)
-    eye = np.eye(4, dtype=dtype)
-    np.testing.assert_allclose(
-        np.asarray(prod), eye,
-        rtol=0, atol=dtype(2e-6),
-        err_msg=f"inv * A != I ({dtype.__name__})"
-    )
+    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), f"inv(4x4) {dtype.__name__}")
 
-def test_inv_random_3x3_correctness(cpp, dtype):
-    """inv(A) @ A ≈ I for random 3×3."""
+def test_inv_random_3x3(cpp, dtype):
+    """inv(A) bit-identical to numpy for random 3×3."""
     a = random_array((3, 3), dtype=dtype)
-    a_inv = cpp.linalg.inv(a)
-    prod = cpp.matmul(a_inv, a)
-    eye = np.eye(3, dtype=dtype)
-    np.testing.assert_allclose(
-        np.asarray(prod), eye,
-        rtol=0, atol=dtype(2e-6),
-        err_msg=f"inv(3x3) * A != I ({dtype.__name__})"
-    )
+    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), f"inv(3x3) {dtype.__name__}")
 
 def test_inv_singular(cpp):
     """inv(singular) — numpy raises LinAlgError."""
@@ -1289,17 +1274,10 @@ def test_inv_singular(cpp):
     with _pytest.raises(RuntimeError):
         cpp.linalg.inv(a)
 
-def test_inv_random_8x8_correctness(cpp):
-    """inv(A) @ A ≈ I for random 8×8 float64."""
+def test_inv_random_8x8(cpp):
+    """inv(A) bit-identical to numpy for random 8×8 float64."""
     a = random_array((8, 8), dtype=np.float64, seed=42)
-    a_inv = cpp.linalg.inv(a)
-    prod = cpp.matmul(a_inv, a)
-    eye = np.eye(8, dtype=np.float64)
-    np.testing.assert_allclose(
-        np.asarray(prod), eye,
-        rtol=0, atol=1e-12,
-        err_msg="inv(8x8) * A != I (f64)"
-    )
+    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), "inv(8x8) f64")
 
 def test_dot(cpp, dtype):
     a = random_array((5,), dtype=dtype)

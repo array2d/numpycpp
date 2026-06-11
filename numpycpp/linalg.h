@@ -97,18 +97,13 @@ inline void norm_axis(const T* src, T* dst,
 }
 
 /// numpy.linalg.inv(a) — matrix inverse (square N×N)
-/// Uses LAPACKE getrf+getri (bitexact) or Gauss-Jordan (std backend).
+/// Uses DGESV (bitexact) or Gauss-Jordan (std backend).
 /// Returns true on success; false if matrix is singular or LAPACK unavailable.
 template<typename T>
 inline bool inv(const T* A, T* A_inv, size_t N) {
     // Copy input to output buffer (inv modifies in-place)
     for (size_t i = 0; i < N * N; ++i) A_inv[i] = A[i];
     bool ok = numpy::detail::blas_ops<T>::inv(A_inv, N);
-    if (ok) {
-        // Normalise -0.0 → +0.0 (LAPACK build variance in signed-zero output)
-        for (size_t i = 0; i < N * N; ++i)
-            if (A_inv[i] == T(0)) A_inv[i] = T(0);
-    }
     return ok;
 }
 

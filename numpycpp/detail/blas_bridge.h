@@ -38,6 +38,7 @@ Use #include "numpycpp/numpy.h" instead."
 #endif
 
 #include <cstdint>
+#include <cstring>
 #include <cmath>
 #include <dlfcn.h>
 #include <fstream>
@@ -233,46 +234,77 @@ inline void blas_dgemm(const double* A, const double* B, double* C,
 }
 
 // ============================================================================
-// LAPACK — LU factorisation + matrix inverse (numpy.linalg.inv)
+// LAPACK — matrix inverse (numpy.linalg.inv) via Fortran DGESV
 // ============================================================================
-// numpy.linalg.inv uses LAPACKE (C interface) routing through OpenBLAS ILP64.
-// LAPACKE internally handles row→column conversion and workspace allocation,
-// producing the exact same floating-point rounding path as numpy.
+// numpy.linalg.inv calls LAPACK ?gesv (solve A·X = I).  DGESV fuses LU
+// factorisation + forward/back substitution in a single kernel.
 //
-// LAPACKE function signatures (ILP64, return info as int64_t):
-//   LAPACKE_sgetrf64_(layout, m, n, a, lda, ipiv)
-//   LAPACKE_sgetri64_(layout, n, a, lda, ipiv)
-// layout = 101 (LAPACK_ROW_MAJOR)
+// On this OpenBLAS build, sgesv_64_ produces 1‑ULP differences vs numpy for
+// float32 inputs.  NumPy's float32 inv is bit‑equivalent to: promote to
+// float64 → dgesv → demote to float32.  We follow that same path so both
+// dtypes are IEEE‑754 bit‑identical to numpy.
+//
+// Fortran DGESV signature (ILP64, _64_ suffix):
+//   dgesv_64_(int64_t *N, int64_t *NRHS, double *A, int64_t *LDA,
+//             int64_t *IPIV, double *B, int64_t *LDB, int64_t *INFO);
 
-using LAPACKE_sgetrf64_fn = int64_t(int, int64_t, int64_t, float*,  int64_t, int64_t*);
-using LAPACKE_dgetrf64_fn = int64_t(int, int64_t, int64_t, double*, int64_t, int64_t*);
-using LAPACKE_sgetri64_fn = int64_t(int, int64_t, float*,  int64_t, const int64_t*);
-using LAPACKE_dgetri64_fn = int64_t(int, int64_t, double*, int64_t, const int64_t*);
+using dgesv64_fn = void(int64_t*, int64_t*, double*, int64_t*,
+                         int64_t*, double*, int64_t*, int64_t*);
 
-/// LAPACKE-based matrix inverse (C interface, RowMajor).
-/// Uses ?getrf (LU factorisation) + ?getri (inverse from LU).
-/// Matches numpy.linalg.inv exactly — same LAPACKE path, same ILP64 ABI.
-inline bool blas_sinv(float* A, size_t N) {
-    static auto getrf = (LAPACKE_sgetrf64_fn*)resolve_blas("LAPACKE_sgetrf64_");
-    static auto getri = (LAPACKE_sgetri64_fn*)resolve_blas("LAPACKE_sgetri64_");
-    if (__builtin_expect(getrf == nullptr || getri == nullptr, 0)) return false;
+/// Fortran DGESV-based matrix inverse.  Matches numpy.linalg.inv exactly
+/// — same Fortran symbol, same ILP64 ABI, same memory layout.
+template<typename T> inline bool blas_gesv_inv(T* A, size_t N);
+
+template<> inline bool blas_gesv_inv<float>(float* A, size_t N) {
+    // numpy.linalg.inv for float32 produces the same bits as:
+    //   float32 → float64 → dgesv → float32
+    // (OpenBLAS sgesv_64_ gives 1-ULP-off results vs numpy on this build;
+    //  the float64 path is bit-identical for both types.)
+    static auto gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
+    if (__builtin_expect(gesv == nullptr, 0)) return false;
     int64_t n = static_cast<int64_t>(N);
     auto ipiv = std::make_unique<int64_t[]>(N);
-    int64_t info = getrf(101, n, n, A, n, ipiv.get());
+    // Double-precision work buffers (column-major)
+    auto A_col = std::make_unique<double[]>(N * N);
+    auto B_col = std::make_unique<double[]>(N * N);
+    // Promote A row-major → A_col column-major (float→double)
+    for (size_t i = 0; i < N; ++i)
+        for (size_t j = 0; j < N; ++j)
+            A_col[j*N + i] = static_cast<double>(A[i*N + j]);
+    // B = identity (column-major, double)
+    std::memset(B_col.get(), 0, N * N * sizeof(double));
+    for (size_t i = 0; i < N; ++i)
+        B_col[i + i*N] = 1.0;
+    int64_t nrhs = n, lda = n, ldb = n, info = 0;
+    gesv(&n, &nrhs, A_col.get(), &lda, ipiv.get(), B_col.get(), &ldb, &info);
     if (info != 0) return false;
-    info = getri(101, n, A, n, ipiv.get());
-    return info == 0;
+    // Demote solution back to float32 row-major
+    for (size_t i = 0; i < N; ++i)
+        for (size_t j = 0; j < N; ++j)
+            A[i*N + j] = static_cast<float>(B_col[j*N + i]);
+    return true;
 }
-inline bool blas_dinv(double* A, size_t N) {
-    static auto getrf = (LAPACKE_dgetrf64_fn*)resolve_blas("LAPACKE_dgetrf64_");
-    static auto getri = (LAPACKE_dgetri64_fn*)resolve_blas("LAPACKE_dgetri64_");
-    if (__builtin_expect(getrf == nullptr || getri == nullptr, 0)) return false;
+
+template<> inline bool blas_gesv_inv<double>(double* A, size_t N) {
+    static auto gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
+    if (__builtin_expect(gesv == nullptr, 0)) return false;
     int64_t n = static_cast<int64_t>(N);
     auto ipiv = std::make_unique<int64_t[]>(N);
-    int64_t info = getrf(101, n, n, A, n, ipiv.get());
+    auto A_col = std::make_unique<double[]>(N * N);
+    auto B_col = std::make_unique<double[]>(N * N);
+    for (size_t i = 0; i < N; ++i)
+        for (size_t j = 0; j < N; ++j)
+            A_col[j*N + i] = A[i*N + j];
+    for (size_t i = 0; i < N; ++i)
+        for (size_t j = 0; j < N; ++j)
+            B_col[i + j*N] = (i == j) ? 1.0 : 0.0;
+    int64_t nrhs = n, lda = n, ldb = n, info = 0;
+    gesv(&n, &nrhs, A_col.get(), &lda, ipiv.get(), B_col.get(), &ldb, &info);
     if (info != 0) return false;
-    info = getri(101, n, A, n, ipiv.get());
-    return info == 0;
+    for (size_t i = 0; i < N; ++i)
+        for (size_t j = 0; j < N; ++j)
+            A[i*N + j] = B_col[j*N + i];
+    return true;
 }
 
 // Template dispatcher
@@ -290,7 +322,7 @@ template<> struct blas_ops<float> {
     static void  gemvt(const float*  B, const float*  a, float*  y,
                        size_t K, size_t N) { blas_sgemv_t(B, a, y, K, N); }
     // A_inv[N×N] = inv(A[N×N]) — in-place, returns true on success
-    static bool  inv  (float* A, size_t N) { return blas_sinv(A, N); }
+    static bool  inv  (float* A, size_t N) { return blas_gesv_inv<float>(A, N); }
 };
 template<> struct blas_ops<double> {
     static double dot  (const double* x, const double* y, size_t n) { return blas_ddot(x, y, n); }
@@ -301,7 +333,7 @@ template<> struct blas_ops<double> {
                         size_t M, size_t K) { blas_dgemv(A, x, y, M, K); }
     static void   gemvt(const double* B, const double* a, double* y,
                         size_t K, size_t N) { blas_dgemv_t(B, a, y, K, N); }
-    static bool   inv  (double* A, size_t N) { return blas_dinv(A, N); }
+    static bool   inv  (double* A, size_t N) { return blas_gesv_inv<double>(A, N); }
 };
 
 } // namespace detail
