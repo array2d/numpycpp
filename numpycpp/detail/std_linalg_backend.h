@@ -28,6 +28,7 @@ Use #include \"numpycpp/numpy.h\" instead."
 
 #include <cmath>
 #include <cstddef>
+#include <stdexcept>
 
 namespace numpy {
 namespace detail {
@@ -98,13 +99,13 @@ inline void std_dgemm(const double* A, const double* B, double* C,
 
 // ============================================================================
 // Matrix inverse — Gauss-Jordan elimination with partial pivoting
-// (std backend fallback when LAPACK not available)
+// (std backend when LAPACK not available)
 // ============================================================================
 // Augments [A | I], eliminates to [I | A⁻¹], then extracts RHS.
-// Returns true on success, false if matrix is singular (pivot too small).
+// Throws std::runtime_error if matrix is singular (pivot too small).
 
 template<typename T>
-inline bool std_inv(T* A, size_t N) {
+inline void std_inv(T* A, size_t N) {
     // Augmented matrix [A | I] stored row-major: rows of 2N elements
     auto aug = std::make_unique<T[]>(N * 2 * N);
     for (size_t i = 0; i < N; ++i) {
@@ -120,7 +121,8 @@ inline bool std_inv(T* A, size_t N) {
             T v = std::abs(aug[row*2*N + col]);
             if (v > max_val) { max_val = v; pivot_row = row; }
         }
-        if (max_val < T(1e-30)) return false;  // singular
+        if (max_val < T(1e-30))
+            throw std::runtime_error("linalg.inv: singular matrix (Gauss-Jordan pivot too small)");
 
         // Swap rows if needed
         if (pivot_row != col) {
@@ -146,7 +148,6 @@ inline bool std_inv(T* A, size_t N) {
     for (size_t i = 0; i < N; ++i)
         for (size_t j = 0; j < N; ++j)
             A[i*N + j] = aug[i*2*N + N + j];
-    return true;
 }
 
 // ============================================================================
@@ -175,9 +176,7 @@ template<> struct blas_ops<float> {
                       size_t K, size_t N) {
         std_sgemv_t(B, a, y, K, N);
     }
-    static bool inv  (float* A, size_t N) {
-        return std_inv(A, N);
-    }
+    static void inv  (float* A, size_t N) { std_inv(A, N); }
 };
 
 template<> struct blas_ops<double> {
@@ -199,9 +198,7 @@ template<> struct blas_ops<double> {
                       size_t K, size_t N) {
         std_dgemv_t(B, a, y, K, N);
     }
-    static bool inv  (double* A, size_t N) {
-        return std_inv(A, N);
-    }
+    static void inv  (double* A, size_t N) { std_inv(A, N); }
 };
 
 } // namespace detail

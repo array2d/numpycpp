@@ -28,7 +28,8 @@
 //   sdot_64_(n*, x*, incx*, y*, incy*)  → float   (return in xmm0)
 //   ddot_64_(n*, x*, incx*, y*, incy*)  → double  (return in xmm0)
 //
-// Fallback (if OpenBLAS not discovered): sequential accumulation.
+// No fallback: if OpenBLAS ILP64 symbols are not found, throws
+// std::runtime_error immediately.  Silent failures are forbidden.
 
 #pragma once
 
@@ -41,6 +42,7 @@ Use #include "numpycpp/numpy.h" instead."
 #include <cstring>
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 #include <dlfcn.h>
 #include <fstream>
 #include <string>
@@ -50,40 +52,63 @@ namespace detail {
 
 inline void* g_blas_handle = nullptr;
 
-inline const char* find_openblas_path() {
+inline const std::string& find_openblas_path() {
     static std::string path;
     static bool tried = false;
-    if (tried) return path.empty() ? nullptr : path.c_str();
+    if (tried) {
+        if (path.empty())
+            throw std::runtime_error(
+                "OpenBLAS ILP64 library not found in /proc/self/maps. "
+                "Import numpy (or another package that loads libopenblas64) "
+                "before calling numpycpp BLAS/LAPACK functions.");
+        return path;
+    }
     tried = true;
 
     std::ifstream maps("/proc/self/maps");
     std::string line;
     while (std::getline(maps, line)) {
-        if (line.find("libopenblas") != std::string::npos &&
-            line.find(".so")         != std::string::npos) {
+        // Match only ILP64 OpenBLAS (e.g. libopenblas64_p-*.so).
+        // scipy's LP64 libopenblas**p**-*.so does NOT have _64_ symbols
+        // (dgesv_64_, sdot_64_, etc.), so picking it causes silent failures.
+        if (line.find("libopenblas64") != std::string::npos &&
+            line.find(".so")           != std::string::npos) {
             auto pos   = line.rfind('/');
             auto start = line.rfind(' ', pos);
             if (start != std::string::npos && pos != std::string::npos) {
                 path = line.substr(start + 1);
-                // trim trailing whitespace / newline
                 while (!path.empty() && (path.back() == '\n' || path.back() == '\r'
                                          || path.back() == ' '))
                     path.pop_back();
-                break;
+                return path;
             }
         }
     }
-    // If not found yet, allow retry on next call (OpenBLAS may be loaded later)
-    if (path.empty()) tried = false;
-    return path.empty() ? nullptr : path.c_str();
+    // Not found — throw immediately.  No retry, no fallback.
+    throw std::runtime_error(
+        "OpenBLAS ILP64 library (libopenblas64) not found in /proc/self/maps. "
+        "Import numpy before calling numpycpp BLAS/LAPACK functions.");
 }
 
 inline void* resolve_blas(const char* sym) {
     if (!g_blas_handle) {
-        const char* path = find_openblas_path();
-        if (path) g_blas_handle = dlopen(path, RTLD_NOLOAD | RTLD_LAZY);
+        const std::string& path = find_openblas_path();  // throws if not found
+        void* h = dlopen(path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+        if (!h)
+            throw std::runtime_error(std::string("dlopen failed for ") + path +
+                                     ": " + (dlerror() ? dlerror() : "unknown"));
+        // Validate the symbol exists before caching the handle
+        if (!dlsym(h, sym))
+            throw std::runtime_error(std::string("BLAS symbol '") + sym +
+                                     "' not found in " + path +
+                                     " (ILP64 ABI mismatch? Check libopenblas64_p-*.so)");
+        g_blas_handle = h;
     }
-    return g_blas_handle ? dlsym(g_blas_handle, sym) : nullptr;
+    void* fn = dlsym(g_blas_handle, sym);
+    if (!fn)
+        throw std::runtime_error(std::string("BLAS symbol '") + sym +
+                                 "' disappeared from cached handle");
+    return fn;
 }
 
 // ILP64 Fortran function types (all int args are int64_t by pointer)
@@ -108,28 +133,15 @@ using cblas_dgemm64_fn = void(int, int, int,
                                double,       double*, int64_t);
 
 inline float blas_sdot(const float* x, const float* y, size_t n) {
-    static sdot64_fn* fn = nullptr;
-    if (!fn) fn = (sdot64_fn*)resolve_blas("sdot_64_");
-    if (__builtin_expect(fn != nullptr, 1)) {
-        const int64_t ni = static_cast<int64_t>(n), inc = 1;
-        return fn(&ni, x, &inc, y, &inc);
-    }
-    // Fallback: sequential accumulation
-    float r = 0.0f;
-    for (size_t i = 0; i < n; ++i) r += x[i] * y[i];
-    return r;
+    static sdot64_fn* fn = (sdot64_fn*)resolve_blas("sdot_64_");
+    const int64_t ni = static_cast<int64_t>(n), inc = 1;
+    return fn(&ni, x, &inc, y, &inc);
 }
 
 inline double blas_ddot(const double* x, const double* y, size_t n) {
-    static ddot64_fn* fn = nullptr;
-    if (!fn) fn = (ddot64_fn*)resolve_blas("ddot_64_");
-    if (__builtin_expect(fn != nullptr, 1)) {
-        const int64_t ni = static_cast<int64_t>(n), inc = 1;
-        return fn(&ni, x, &inc, y, &inc);
-    }
-    double r = 0.0;
-    for (size_t i = 0; i < n; ++i) r += x[i] * y[i];
-    return r;
+    static ddot64_fn* fn = (ddot64_fn*)resolve_blas("ddot_64_");
+    const int64_t ni = static_cast<int64_t>(n), inc = 1;
+    return fn(&ni, x, &inc, y, &inc);
 }
 
 // cblas_sgemv64_ / cblas_dgemv64_  — matrix-vector, ILP64
@@ -145,103 +157,46 @@ using cblas_dgemv64_fn = void(int, int, int64_t, int64_t,
 
 // y[M] = A[M×K] @ x[K]  — 2D × 1D case
 inline void blas_sgemv(const float* A, const float* x, float* y, size_t M, size_t K) {
-    static cblas_sgemv64_fn* fn = nullptr;
-    if (!fn) fn = (cblas_sgemv64_fn*)resolve_blas("cblas_sgemv64_");
-    if (__builtin_expect(fn != nullptr, 1)) {
-        fn(101, 111, (int64_t)M, (int64_t)K, 1.0f, A, (int64_t)K,
-                                              x, 1, 0.0f, y, 1);
-        return;
-    }
-    for (size_t i = 0; i < M; ++i) {
-        float s = 0.0f;
-        for (size_t k = 0; k < K; ++k) s += A[i*K+k] * x[k];
-        y[i] = s;
-    }
+    static cblas_sgemv64_fn* fn = (cblas_sgemv64_fn*)resolve_blas("cblas_sgemv64_");
+    fn(101, 111, (int64_t)M, (int64_t)K, 1.0f, A, (int64_t)K,
+                                          x, 1, 0.0f, y, 1);
 }
 inline void blas_dgemv(const double* A, const double* x, double* y, size_t M, size_t K) {
-    static cblas_dgemv64_fn* fn = nullptr;
-    if (!fn) fn = (cblas_dgemv64_fn*)resolve_blas("cblas_dgemv64_");
-    if (__builtin_expect(fn != nullptr, 1)) {
-        fn(101, 111, (int64_t)M, (int64_t)K, 1.0, A, (int64_t)K,
-                                              x, 1, 0.0, y, 1);
-        return;
-    }
-    for (size_t i = 0; i < M; ++i) {
-        double s = 0.0;
-        for (size_t k = 0; k < K; ++k) s += A[i*K+k] * x[k];
-        y[i] = s;
-    }
+    static cblas_dgemv64_fn* fn = (cblas_dgemv64_fn*)resolve_blas("cblas_dgemv64_");
+    fn(101, 111, (int64_t)M, (int64_t)K, 1.0, A, (int64_t)K,
+                                          x, 1, 0.0, y, 1);
 }
 
 // y[N] = B^T[K×N] @ a[K]  — 1D × 2D case (Trans=112)
 inline void blas_sgemv_t(const float* B, const float* a, float* y, size_t K, size_t N) {
-    static cblas_sgemv64_fn* fn = nullptr;
-    if (!fn) fn = (cblas_sgemv64_fn*)resolve_blas("cblas_sgemv64_");
-    if (__builtin_expect(fn != nullptr, 1)) {
-        fn(101, 112, (int64_t)K, (int64_t)N, 1.0f, B, (int64_t)N,
-                                              a, 1, 0.0f, y, 1);
-        return;
-    }
-    for (size_t j = 0; j < N; ++j) {
-        float s = 0.0f;
-        for (size_t k = 0; k < K; ++k) s += B[k*N+j] * a[k];
-        y[j] = s;
-    }
+    static cblas_sgemv64_fn* fn = (cblas_sgemv64_fn*)resolve_blas("cblas_sgemv64_");
+    fn(101, 112, (int64_t)K, (int64_t)N, 1.0f, B, (int64_t)N,
+                                          a, 1, 0.0f, y, 1);
 }
 inline void blas_dgemv_t(const double* B, const double* a, double* y, size_t K, size_t N) {
-    static cblas_dgemv64_fn* fn = nullptr;
-    if (!fn) fn = (cblas_dgemv64_fn*)resolve_blas("cblas_dgemv64_");
-    if (__builtin_expect(fn != nullptr, 1)) {
-        fn(101, 112, (int64_t)K, (int64_t)N, 1.0, B, (int64_t)N,
-                                              a, 1, 0.0, y, 1);
-        return;
-    }
-    for (size_t j = 0; j < N; ++j) {
-        double s = 0.0;
-        for (size_t k = 0; k < K; ++k) s += B[k*N+j] * a[k];
-        y[j] = s;
-    }
+    static cblas_dgemv64_fn* fn = (cblas_dgemv64_fn*)resolve_blas("cblas_dgemv64_");
+    fn(101, 112, (int64_t)K, (int64_t)N, 1.0, B, (int64_t)N,
+                                          a, 1, 0.0, y, 1);
 }
 
 // C = A @ B  (all row-major)  C[M×N] = A[M×K] @ B[K×N]
 // Uses cblas_sgemm64_ — same kernel numpy.matmul calls → 0 ULP by construction.
 inline void blas_sgemm(const float* A, const float* B, float* C,
                        size_t M, size_t K, size_t N) {
-    static cblas_sgemm64_fn* fn = nullptr;
-    if (!fn) fn = (cblas_sgemm64_fn*)resolve_blas("cblas_sgemm64_");
-    if (__builtin_expect(fn != nullptr, 1)) {
-        fn(101, 111, 111,                        // RowMajor, NoTrans, NoTrans
-           (int64_t)M, (int64_t)N, (int64_t)K,
-           1.0f, A, (int64_t)K, B, (int64_t)N,
-           0.0f, C, (int64_t)N);
-        return;
-    }
-    // Fallback (no OpenBLAS): naive triple loop — not bit-exact but always correct
-    for (size_t i = 0; i < M; ++i)
-        for (size_t j = 0; j < N; ++j) {
-            float s = 0.0f;
-            for (size_t k = 0; k < K; ++k) s += A[i*K+k] * B[k*N+j];
-            C[i*N+j] = s;
-        }
+    static cblas_sgemm64_fn* fn = (cblas_sgemm64_fn*)resolve_blas("cblas_sgemm64_");
+    fn(101, 111, 111,                        // RowMajor, NoTrans, NoTrans
+       (int64_t)M, (int64_t)N, (int64_t)K,
+       1.0f, A, (int64_t)K, B, (int64_t)N,
+       0.0f, C, (int64_t)N);
 }
 
 inline void blas_dgemm(const double* A, const double* B, double* C,
                        size_t M, size_t K, size_t N) {
-    static cblas_dgemm64_fn* fn = nullptr;
-    if (!fn) fn = (cblas_dgemm64_fn*)resolve_blas("cblas_dgemm64_");
-    if (__builtin_expect(fn != nullptr, 1)) {
-        fn(101, 111, 111,
-           (int64_t)M, (int64_t)N, (int64_t)K,
-           1.0, A, (int64_t)K, B, (int64_t)N,
-           0.0, C, (int64_t)N);
-        return;
-    }
-    for (size_t i = 0; i < M; ++i)
-        for (size_t j = 0; j < N; ++j) {
-            double s = 0.0;
-            for (size_t k = 0; k < K; ++k) s += A[i*K+k] * B[k*N+j];
-            C[i*N+j] = s;
-        }
+    static cblas_dgemm64_fn* fn = (cblas_dgemm64_fn*)resolve_blas("cblas_dgemm64_");
+    fn(101, 111, 111,
+       (int64_t)M, (int64_t)N, (int64_t)K,
+       1.0, A, (int64_t)K, B, (int64_t)N,
+       0.0, C, (int64_t)N);
 }
 
 // ============================================================================
@@ -264,16 +219,15 @@ using dgesv64_fn = void(int64_t*, int64_t*, double*, int64_t*,
 
 /// Fortran DGESV-based matrix inverse.  Matches numpy.linalg.inv exactly
 /// — same Fortran symbol, same ILP64 ABI, same memory layout.
-template<typename T> inline bool blas_gesv_inv(T* A, size_t N);
+/// Throws std::runtime_error on singular matrix (LAPACK info != 0).
+template<typename T> inline void blas_gesv_inv(T* A, size_t N);
 
-template<> inline bool blas_gesv_inv<float>(float* A, size_t N) {
+template<> inline void blas_gesv_inv<float>(float* A, size_t N) {
     // numpy.linalg.inv for float32 produces the same bits as:
     //   float32 → float64 → dgesv → float32
     // (OpenBLAS sgesv_64_ gives 1-ULP-off results vs numpy on this build;
     //  the float64 path is bit-identical for both types.)
-    static dgesv64_fn* gesv = nullptr;
-    if (!gesv) gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
-    if (__builtin_expect(gesv == nullptr, 0)) return false;
+    static dgesv64_fn* gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
     int64_t n = static_cast<int64_t>(N);
     auto ipiv = std::make_unique<int64_t[]>(N);
     // Double-precision work buffers (column-major)
@@ -289,18 +243,17 @@ template<> inline bool blas_gesv_inv<float>(float* A, size_t N) {
         B_col[i + i*N] = 1.0;
     int64_t nrhs = n, lda = n, ldb = n, info = 0;
     gesv(&n, &nrhs, A_col.get(), &lda, ipiv.get(), B_col.get(), &ldb, &info);
-    if (info != 0) return false;
+    if (info != 0)
+        throw std::runtime_error("linalg.inv: singular matrix (DGESV info=" +
+                                 std::to_string(info) + ")");
     // Demote solution back to float32 row-major
     for (size_t i = 0; i < N; ++i)
         for (size_t j = 0; j < N; ++j)
             A[i*N + j] = static_cast<float>(B_col[j*N + i]);
-    return true;
 }
 
-template<> inline bool blas_gesv_inv<double>(double* A, size_t N) {
-    static dgesv64_fn* gesv = nullptr;
-    if (!gesv) gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
-    if (__builtin_expect(gesv == nullptr, 0)) return false;
+template<> inline void blas_gesv_inv<double>(double* A, size_t N) {
+    static dgesv64_fn* gesv = (dgesv64_fn*)resolve_blas("dgesv_64_");
     int64_t n = static_cast<int64_t>(N);
     auto ipiv = std::make_unique<int64_t[]>(N);
     auto A_col = std::make_unique<double[]>(N * N);
@@ -313,11 +266,12 @@ template<> inline bool blas_gesv_inv<double>(double* A, size_t N) {
             B_col[i + j*N] = (i == j) ? 1.0 : 0.0;
     int64_t nrhs = n, lda = n, ldb = n, info = 0;
     gesv(&n, &nrhs, A_col.get(), &lda, ipiv.get(), B_col.get(), &ldb, &info);
-    if (info != 0) return false;
+    if (info != 0)
+        throw std::runtime_error("linalg.inv: singular matrix (DGESV info=" +
+                                 std::to_string(info) + ")");
     for (size_t i = 0; i < N; ++i)
         for (size_t j = 0; j < N; ++j)
             A[i*N + j] = B_col[j*N + i];
-    return true;
 }
 
 // Template dispatcher
@@ -328,14 +282,11 @@ template<> struct blas_ops<float> {
     static float norm (const float*  x,                  size_t n) { return std::sqrt(blas_sdot(x, x, n)); }
     static void  gemm (const float*  A, const float*  B, float*  C,
                        size_t M, size_t K, size_t N) { blas_sgemm(A, B, C, M, K, N); }
-    // y[M] = A[M×K] @ x[K]
     static void  gemv (const float*  A, const float*  x, float*  y,
                        size_t M, size_t K) { blas_sgemv(A, x, y, M, K); }
-    // y[N] = B^T @ a[K]   (1D × 2D case)
     static void  gemvt(const float*  B, const float*  a, float*  y,
                        size_t K, size_t N) { blas_sgemv_t(B, a, y, K, N); }
-    // A_inv[N×N] = inv(A[N×N]) — in-place, returns true on success
-    static bool  inv  (float* A, size_t N) { return blas_gesv_inv<float>(A, N); }
+    static void  inv  (float* A, size_t N) { blas_gesv_inv<float>(A, N); }
 };
 template<> struct blas_ops<double> {
     static double dot  (const double* x, const double* y, size_t n) { return blas_ddot(x, y, n); }
@@ -346,7 +297,7 @@ template<> struct blas_ops<double> {
                         size_t M, size_t K) { blas_dgemv(A, x, y, M, K); }
     static void   gemvt(const double* B, const double* a, double* y,
                         size_t K, size_t N) { blas_dgemv_t(B, a, y, K, N); }
-    static bool   inv  (double* A, size_t N) { return blas_gesv_inv<double>(A, N); }
+    static void   inv  (double* A, size_t N) { blas_gesv_inv<double>(A, N); }
 };
 
 } // namespace detail

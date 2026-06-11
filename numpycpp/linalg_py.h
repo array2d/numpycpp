@@ -18,7 +18,8 @@ T norm(const py::array_t<T>& arr) {
     return norm(static_cast<const T*>(buf.ptr), buf.size);
 }
 
-/// numpy.linalg.inv(a) — matrix inverse
+/// numpy.linalg.inv(a) — matrix inverse.  Throws on singular matrix or
+/// BLAS unavailability (no silent failure / fallback tolerated).
 template<typename T>
 py::array_t<T> inv(const py::array_t<T>& arr) {
     auto buf = arr.request();
@@ -29,10 +30,9 @@ py::array_t<T> inv(const py::array_t<T>& arr) {
     if (buf.shape[1] != static_cast<py::ssize_t>(N))
         throw std::invalid_argument("linalg.inv: expected square matrix");
     py::array_t<T> result(buf.shape);
-    bool ok = numpy::linalg::inv(static_cast<const T*>(buf.ptr),
-                                  static_cast<T*>(result.request().ptr), N);
-    if (!ok)
-        throw std::runtime_error("linalg.inv: singular matrix or LAPACK unavailable");
+    numpy::linalg::inv(static_cast<const T*>(buf.ptr),
+                        static_cast<T*>(result.request().ptr), N);
+    // ^ throws std::runtime_error on failure — no fallback, no silent zeroing
     return result;
 }
 
