@@ -110,7 +110,7 @@ target_compile_features(mymodule PRIVATE cxx_std_17)
 **Manual (header-only)**
 
 Add `-Ipath/to/numpycpp` to your compiler flags and include the headers directly. No build step, no copy required.
-- Bitexact backend: add `-ldl` at link time (no other flags needed at `-O2`; see compiler flags table below)
+- Bitexact backend: add `-ldl` at link time. See compiler flags table below for required flags (`-ffp-contract=off`, `-msse4.1`, etc.).
 - Std backend: add `-DNUMPYCPP_STD_ONLY` (no `-ldl` needed)
 
 ### Testing
@@ -158,22 +158,42 @@ The minimum set was determined empirically: each flag was removed in isolation
 and the full 981-test suite was re-run. Only flags whose removal caused at
 least one test failure are marked **required**.
 
+The SVML bridge compiles cleanly with or without `-mavx512f` — all AVX-512 code
+is guarded by `#ifdef __AVX512F__`. Without `-mavx512f`, the scalar `npy_*`
+path is used (resolved via `dlsym` from numpy's `.so`), which is still bit-exact.
+We recommend using cmake's `check_cxx_source_runs` to probe AVX-512 at configure
+time — see [`tests/CMakeLists.txt`](tests/CMakeLists.txt) for a complete example.
+
 ```cmake
 target_compile_options(<target> PRIVATE
+    -O2
     -ffp-contract=off          # REQUIRED — see below
-    -mavx512f -mfma            # REQUIRED — see below
-    -mprefer-vector-width=256  # REQUIRED — see below
+    -msse4.1                   # REQUIRED — see below
+    -mfma                      # REQUIRED with -mavx512f — see below
+    -mavx512f                  # recommended — see below (use cmake probe)
+    -mprefer-vector-width=256  # REQUIRED with -mavx512f — see below
+    # Defensive: prevent GCC from substituting npy_* call sites with builtins.
+    # No test currently depends on these — kept as future-proofing.
+    -fno-builtin-exp   -fno-builtin-log   -fno-builtin-sin
+    -fno-builtin-cos   -fno-builtin-tan   -fno-builtin-pow
+    -fno-builtin-sqrt  -fno-builtin-atan2 -fno-builtin-log2
+    -fno-builtin-log10 -fno-builtin-asin  -fno-builtin-acos
+    -fno-builtin-atan  -fno-builtin-exp2
+    -fno-builtin-cbrt  -fno-builtin-expm1 -fno-builtin-log1p
 )
 target_link_libraries(<target> PRIVATE dl)   # REQUIRED — dlsym
 ```
 
 | Flag | Status | Why required | Consequence of removal |
 |------|:------:|-------------|------------------------|
-| `-ffp-contract=off` | **required** | Prevents silent FMA fusion of `a*b+c`. einsum loops must match numpy's BLAS multiply-then-add order. | 36 einsum tests fail with ±1 ULP. |
-| `-mavx512f -mfma` | **required** | SVML bridge declares `exp_svml_f64` etc. inside `#ifdef __AVX512F__`. AVX-512 intrinsics are runtime-guarded — binary safe on non-AVX-512 CPUs. | Hard compile error: `'exp_svml_f64' was not declared`. |
-| `-mprefer-vector-width=256` | **required** | Prevents GCC from emitting ZMM instructions globally. Some cloud VMs expose `avx512f` in CPUID but trap ZMM via hypervisor XSAVE. The SVML bridge is safe (runtime guard), but unguarded auto-vectorized ZMM causes SIGILL. | SIGILL at startup on some cloud VMs (GitHub Actions azure runners). |
+| `-O2` | recommended | Standard optimization level. Without optimization, bit-exact results are preserved but performance degrades significantly. | Slow execution (correctness unaffected). |
+| `-ffp-contract=off` | **required** | Prevents silent FMA fusion of `a*b+c`. einsum loops must match numpy's BLAS multiply-then-add order. | 36 einsum tests fail with ±1 ULP (verified). |
+| `-msse4.1` | **required** | `linalg.h` uses `_mm_insert_epi32` (SSE4.1 instruction) unconditionally. | Hard compile error: `'__builtin_ia32_pinsrd' requires SSE4.1`. |
+| `-mfma` | **required** | `avx512_loops.h` uses `_mm512_fmadd_ps/pd` inside `#ifdef __AVX512F__`. Only needed together with `-mavx512f`. | Hard compile error if `-mavx512f` is enabled. |
+| `-mavx512f` | recommended | Enables the AVX-512 SVML vector path (`__svml_exp8`, etc.) and wide-loop specializations in `avx512_loops.h`. Without it, the scalar `npy_*` path is used — still bit-exact, but 4–8× slower on large arrays. **Safe on non-AVX-512 CPUs:** all AVX-512 code is isolated behind `__attribute__((target("avx512f")))` + runtime `cpu_has_avx512f()` guard. | Fallback to scalar `npy_*` path (still bit-exact, slower). |
+| `-mprefer-vector-width=256` | **required** | Prevents GCC from emitting ZMM (512-bit) instructions in auto-vectorized code when `-mavx512f` is enabled. Some cloud VMs expose `avx512f` in CPUID but trap ZMM via hypervisor XSAVE. Explicit AVX-512 intrinsics are safe (runtime-guarded), but unguarded auto-vectorized ZMM causes SIGILL. No effect without `-mavx512f`. | SIGILL at startup on some cloud VMs (GitHub Actions azure runners). |
 | `-ldl` | **required** | `dlsym`/`dlopen` locate numpy's `_multiarray_umath.so` at runtime. | Link error: `undefined reference to 'dlsym'`. |
-| `-fno-builtin-exp` … | recommended | Prevents GCC from substituting npy_* call sites with builtins. numpycpp never calls `exp()` from `<cmath>` directly, so no current effect — kept as defensive guard. | No test failure when removed today. |
+| `-fno-builtin-*` (full list) | recommended | Prevents GCC from substituting npy_* call sites with builtin implementations. numpycpp resolves math functions via dlsym at runtime, never calling `exp()` from `<cmath>` directly — so no current effect. Kept as defensive guard against future GCC versions. | No test failure when removed today (verified on GCC 9–14). |
 
 #### Compiler flags — std backend (`NUMPYCPP_STD_ONLY=ON`)
 

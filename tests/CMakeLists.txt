@@ -3,8 +3,8 @@
 # Two build modes (select with -DNUMPYCPP_STD_ONLY):
 #
 #   OFF (default) — bit-exact mode:
-#     All 900 tests verify IEEE 754 bit-identical results vs numpy.
-#     Requires: dlsym, numpy .so loaded, AVX-512 capable machine (or fallback).
+#     All 981 tests verify IEEE 754 bit-identical results vs numpy.
+#     Requires: dlsym, numpy .so loaded.
 #     cmake -S tests -B tests/build
 #
 #   ON — std / performance-first mode:
@@ -108,12 +108,15 @@ if(NUMPYCPP_STD_ONLY)
 else()
     # ── bit-exact build (default) ─────────────────────────────────────────────
     # Flags determined empirically: each flag's removal was tested against all
-    # 900 tests. Only flags whose removal caused failures are marked REQUIRED.
+    # 981 tests. Only flags whose removal caused failures are marked REQUIRED.
     target_compile_options(numpycpp PRIVATE
         -O2
-        -ffp-contract=off          # REQUIRED: no implicit FMA (keeps Cody-Waite exact)
-        -msse4.1 -mfma             # baseline SSE4.1 + FMA
-        # disable builtin replacements so calls go through SVML/npy_math paths
+        -ffp-contract=off          # REQUIRED — verified: 36 einsum tests fail without
+        -msse4.1                   # REQUIRED — _mm_insert_epi32 in linalg.h
+        -mfma                      # REQUIRED — _mm512_fmadd_* in AVX-512 loops
+        # Disable GCC builtin replacements — defensive: no test currently fails
+        # without these, but they prevent future GCC versions from silently
+        # substituting npy_* call sites with builtins.
         -fno-builtin-exp   -fno-builtin-log   -fno-builtin-sin
         -fno-builtin-cos   -fno-builtin-tan   -fno-builtin-pow
         -fno-builtin-sqrt  -fno-builtin-atan2 -fno-builtin-log2
@@ -132,7 +135,7 @@ else()
         target_link_libraries(numpycpp PRIVATE OpenMP::OpenMP_CXX)
     endif()
     target_link_libraries(numpycpp PRIVATE dl)
-    message(STATUS "Test build: bit-exact mode  (-O2 -ffp-contract=off, dlsym, SVML)")
+    message(STATUS "Test build: bit-exact mode  (-O2 -ffp-contract=off -msse4.1 -mfma, dlsym, SVML)")
 endif()
 
 # Place .so next to the test scripts for easy import
