@@ -40,6 +40,15 @@ namespace py = pybind11;
 PYBIND11_MODULE(numpycpp, m) {
     m.doc() = "C++ pixel-level alignment of Python numpy, powered by Eigen";
 
+    // -- 编译模式报告 ----------------------------------------------------------
+    m.def("compile_mode", []() -> const char* {
+#ifdef NUMPYCPP_STD_ONLY
+        return "std";
+#else
+        return "bit_exact";
+#endif
+    });
+
     // -- linalg submodule --------------------------------------------------
     py::module_ la = m.def_submodule("linalg", "numpy.linalg equivalents");
     la.def("norm", static_cast<float(*)(const py::array_t<float>&)>(&numpy::linalg::norm));
@@ -83,12 +92,11 @@ PYBIND11_MODULE(numpycpp, m) {
           py::arg("start"), py::arg("stop"), py::arg("num")=50, py::arg("endpoint")=true);
 
     // -- eye / identity / diag ---------------------------------------------
-    // eye / identity: scalar int arguments — dtype determined by registered order;
-    // float64 is numpy's default so register it last (wins for int args).
-    m.def("eye",      static_cast<py::array_t<float> (*)(py::ssize_t,py::ssize_t,int)>(&numpy::eye<float>),
-          py::arg("N"), py::arg("M")=-1, py::arg("k")=0);
-    m.def("eye",      static_cast<py::array_t<double>(*)(py::ssize_t,py::ssize_t,int)>(&numpy::eye),
-          py::arg("N"), py::arg("M")=-1, py::arg("k")=0);
+    // eye / identity — M=None 表示方阵，严格对齐 numpy API
+    m.def("eye",      static_cast<py::array_t<float> (*)(py::ssize_t,py::object,int)>(&numpy::eye<float>),
+          py::arg("N"), py::arg("M")=py::none(), py::arg("k")=0);
+    m.def("eye",      static_cast<py::array_t<double>(*)(py::ssize_t,py::object,int)>(&numpy::eye),
+          py::arg("N"), py::arg("M")=py::none(), py::arg("k")=0);
     m.def("identity", static_cast<py::array_t<float> (*)(py::ssize_t)>(&numpy::identity<float>));
     m.def("identity", static_cast<py::array_t<double>(*)(py::ssize_t)>(&numpy::identity));
     m.def("diag",     static_cast<py::array_t<float> (*)(const py::array_t<float>&, int)>(&numpy::diag<float>),
@@ -290,12 +298,12 @@ PYBIND11_MODULE(numpycpp, m) {
     // numpy.compress(condition, a) — boolean mask gather
     m.def("compress",
           static_cast<py::array_t<double>(*)(
-              const py::array_t<double>&,
-              const py::array_t<bool>&)>(&numpy::compress));
+              const py::array_t<bool>&,
+              const py::array_t<double>&)>(&numpy::compress));
     m.def("compress",
           static_cast<py::array_t<float>(*)(
-              const py::array_t<float>&,
-              const py::array_t<bool>&)>(&numpy::compress));
+              const py::array_t<bool>&,
+              const py::array_t<float>&)>(&numpy::compress));
 
     // slice(a, starts, stops, steps) — N-D overload of existing slice()
     m.def("slice",

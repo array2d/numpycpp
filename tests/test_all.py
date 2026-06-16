@@ -1,119 +1,194 @@
 """
-Bit-level alignment tests — ALL numpycpp C++ vs Python numpy APIs.
+全量位级对齐测试 —— numpycpp C++ vs Python numpy 全部 API。
 
-SINGLE entry point.  Run with:
-    pytest tests/test_all.py -v
+运行:  pytest tests/test_all.py -v
 
-Alignment: BIT-LEVEL (最高级对齐).
-    Every test asserts bit-identical results between C++ and Python numpy.
-    No tolerance, no atol/rtol — raw IEEE 754 bits must match exactly.
-
-Coverage:
-    - float64 + float32 (via dtype fixture)
-    - All core, linalg, einsum APIs
-    - bool / int / float dtypes
+架构: 5 函数驱动全量测试。
+  F3  compare()     — 位级比对
+  F4  call_cpp_py() — 按名称反射调用 CPP / PY 同名函数
+  F5  api_catalog() — 导出全部 API 元数据（按源码5大类组织）
+  F1  极端数据生成   — 内嵌于各类目工厂函数
+  F2  reshape适配   — 内嵌于各类目工厂函数
 """
 
 import os
 import importlib
 import numpy as np
 import pytest
+from collections import namedtuple
 
 
-# ============================================================================
-# Bit-level assertion helpers
-# ============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# F3: compare — 位级比对
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def check_bit_aligned(cpp_result, py_result, label=""):
-    """Check bit-level alignment between C++ and Python numpy results."""
+_UINT_VIEW = {4: np.uint32, 8: np.uint64}
+_EL_VIEW  = {2: np.uint16, 4: np.uint32, 8: np.uint64}
+_EL_FMT   = {2: "04x", 4: "08x", 8: "016x"}
+
+
+def compare(cpp_result, py_result, strategy="bit_exact", label=""):
+    """统一比对入口。strategy: bit_exact | scalar_eq | shape_only | nan_mask | none"""
+    if strategy == "none":
+        return
+    if strategy == "scalar_eq":
+        c = float(np.asarray(cpp_result).item())
+        p = float(np.asarray(py_result).item())
+        if c != p:
+            raise AssertionError(f"[{label}] scalar mismatch: C++={c} vs numpy={p}")
+        return
+    if strategy == "shape_only":
+        if np.asarray(cpp_result).shape != np.asarray(py_result).shape:
+            raise AssertionError(f"[{label}] shape mismatch: "
+                                 f"C++ {np.asarray(cpp_result).shape} vs numpy {np.asarray(py_result).shape}")
+        return
+    if strategy == "nan_mask":
+        cpp = np.asarray(cpp_result)
+        py  = np.asarray(py_result)
+        if not np.array_equal(np.isnan(cpp), np.isnan(py)):
+            raise AssertionError(f"[{label}] NaN mask mismatch")
+        return
+    # bit_exact
+    _compare_bit_exact(cpp_result, py_result, label)
+
+
+def _compare_bit_exact(cpp_result, py_result, label=""):
+    """位级精确比对，含 hex dump 诊断。"""
     cpp = np.asarray(cpp_result)
-    py = np.asarray(py_result)
+    py  = np.asarray(py_result)
 
-    info = {"label": label, "pass": False,
-            "shape_match": cpp.shape == py.shape, "n_diff": 0, "error": None}
+    if cpp.shape != py.shape:
+        raise AssertionError(
+            f"[{label}] shape mismatch: C++ {cpp.shape} vs numpy {py.shape}")
 
-    if not info["shape_match"]:
-        info["error"] = f"shape mismatch: C++ {cpp.shape} vs Python {py.shape}"
-        return info
-
-    # --- bit-level equality ---
-    # For floating-point arrays with the SAME dtype use uint bit-view comparison so
-    # NaN==NaN (same bits) passes.  np.array_equal returns False for NaN (IEEE 754).
-    #
-    # When dtypes differ (some C++ functions return float64 for float32 input) we
-    # fall back to numpy's numeric comparison (float32 is upcast to float64).
-    _UINT_VIEW = {4: np.uint32, 8: np.uint64}
     if cpp.dtype.kind == 'f' and cpp.dtype == py.dtype:
         uint_t = _UINT_VIEW.get(cpp.itemsize)
         if uint_t is not None:
             cpp_u = np.ascontiguousarray(cpp).ravel().view(uint_t)
-            py_u  = np.ascontiguousarray(py ).ravel().view(uint_t)
+            py_u  = np.ascontiguousarray(py).ravel().view(uint_t)
             if np.array_equal(cpp_u, py_u):
-                info["pass"] = True
-                return info
+                return
             diff_mask = (cpp_u != py_u).reshape(cpp.shape)
         else:
             if np.array_equal(cpp, py):
-                info["pass"] = True
-                return info
+                return
             diff_mask = cpp != py
     else:
         if np.array_equal(cpp, py):
-            info["pass"] = True
-            return info
-        # cpp != py may return a scalar bool (Python/numpy) for incompatible shapes
-        # (old numpy behaviour).  Normalise to an ndarray with cpp's shape.
-        diff_raw = np.asarray(cpp != py)
-        if diff_raw.shape != cpp.shape:
+            return
+        diff_mask = np.asarray(cpp != py)
+        if diff_mask.shape != cpp.shape:
             try:
-                diff_mask = diff_raw.reshape(cpp.shape)
+                diff_mask = diff_mask.reshape(cpp.shape)
             except ValueError:
                 diff_mask = np.ones(cpp.shape, dtype=bool)
-        else:
-            diff_mask = diff_raw
 
-    # --- bit-level mismatch --- build hex diagnostic ---
-    info["n_diff"] = int(np.sum(diff_mask))
-    diff_indices = np.flatnonzero(diff_mask.ravel())
-    n_show = min(5, len(diff_indices))
-
-    err_lines = [f"BIT-LEVEL MISMATCH: {info['n_diff']}/{cpp.size} elements differ"]
-    for idx in diff_indices[:n_show]:
-        cpp_val, py_val = cpp.flat[idx], py.flat[idx]
+    n_diff = int(np.sum(diff_mask))
+    diff_idx = np.flatnonzero(diff_mask.ravel())
+    lines = [f"[{label}] BIT-LEVEL MISMATCH: {n_diff}/{cpp.size}"]
+    for idx in diff_idx[:5]:
+        cv, pv = cpp.flat[idx], py.flat[idx]
         if cpp.dtype == bool or np.issubdtype(cpp.dtype, np.integer):
-            err_lines.append(f"  [{idx}] C++={cpp_val}  vs  numpy={py_val}")
+            lines.append(f"  [{idx}] C++={cv}  vs  numpy={pv}")
         else:
-            _EL_VIEW = {2: np.uint16, 4: np.uint32, 8: np.uint64}
-            _EL_FMT  = {2: "04x", 4: "08x", 8: "016x"}
-            cpp_esz, py_esz = cpp.itemsize, py.itemsize
-            cpp_vdt, py_vdt = _EL_VIEW.get(cpp_esz), _EL_VIEW.get(py_esz)
-            cpp_fmt = _EL_FMT.get(cpp_esz, "016x")
-            py_fmt  = _EL_FMT.get(py_esz, "016x")
-            cpp_hex = np.ascontiguousarray(cpp).view(cpp_vdt).flat[idx] if cpp_vdt else 0
-            py_hex  = np.ascontiguousarray(py ).view(py_vdt ).flat[idx] if py_vdt  else 0
-            if not cpp_vdt: cpp_fmt = ""
-            if not py_vdt:  py_fmt  = ""
-            cpp_str = f"C++={cpp_val:.16e} (0x{cpp_hex:{cpp_fmt}})" if cpp_fmt else f"C++={cpp_val:.16e}"
-            py_str  = f"numpy={py_val:.16e} (0x{py_hex:{py_fmt}})"   if py_fmt  else f"numpy={py_val:.16e}"
-            err_lines.append(f"  [{idx}] {cpp_str}  vs  {py_str}")
-
-    if len(diff_indices) > n_show:
-        err_lines.append(f"  ... and {len(diff_indices) - n_show} more differing elements")
-    info["error"] = "\n".join(err_lines)
-    return info
+            cvt = _EL_VIEW.get(cpp.itemsize)
+            pvt = _EL_VIEW.get(py.itemsize)
+            cf  = _EL_FMT.get(cpp.itemsize, "016x")
+            pf  = _EL_FMT.get(py.itemsize, "016x")
+            ch = np.ascontiguousarray(cpp).view(cvt).flat[idx] if cvt else 0
+            ph = np.ascontiguousarray(py).view(pvt).flat[idx] if pvt else 0
+            lines.append(f"  [{idx}] C++={cv:.16e} (0x{ch:{cf}})  vs  "
+                         f"numpy={pv:.16e} (0x{ph:{pf}})")
+    if len(diff_idx) > 5:
+        lines.append(f"  ... 还有 {len(diff_idx) - 5} 个差异元素")
+    raise AssertionError("\n".join(lines))
 
 
-def assert_bit_aligned(cpp_result, py_result, label=""):
-    """Assert C++ and Python results are bit-level identical."""
-    info = check_bit_aligned(cpp_result, py_result, label=label)
-    if not info["pass"]:
-        raise AssertionError(info.get("error", "bit-level alignment failure"))
-    return info
+# ═══════════════════════════════════════════════════════════════════════════════
+# F4: call_cpp_py — 按名称反射调用 C++ 与 Python 同名函数
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_CPP_TO_NP_MAP = {}
+
+def _register_np_alias(cpp_path, np_path=None):
+    def deco(fn):
+        _CPP_TO_NP_MAP[cpp_path] = (np_path, fn)
+        return fn
+    return deco
+
+# 无 numpy 等效的 API
+@_register_np_alias("putmask")
+def _rewrite_putmask(_r, args, kwargs): return args, kwargs
+_register_np_alias("safe_divide", None)(None)
+_register_np_alias("truncate_to_float32", None)(None)
+_register_np_alias("array_get", None)(None)
+_register_np_alias("get_array", None)(None)
+_register_np_alias("set_array", None)(None)
+_register_np_alias("take_cols", None)(None)
+_register_np_alias("slice_assign", None)(None)
+_register_np_alias("to_vector", None)(None)
 
 
-def random_array(shape, dtype=np.float64, seed: int = 42):
-    """Deterministic random array with controlled seed per shape."""
-    rng = np.random.RandomState(seed + hash(shape) % (2**31))
+def call_cpp_py(api_name, cpp, *args, **kwargs):
+    """按名称字符串反射调用 C++ 和 Python numpy 同名函数。"""
+    parts = api_name.split(".")
+    # 解析 C++ 函数
+    cpp_fn = cpp
+    for part in parts:
+        try:
+            cpp_fn = getattr(cpp_fn, part)
+        except AttributeError:
+            raise AttributeError(
+                f"C++ 模块在路径 '{api_name}' 中不存在属性 '{part}'。"
+                f"可用: {dir(cpp_fn)}")
+    # 解析 numpy 函数
+    np_fn = np
+    np_parts = list(parts)
+    map_entry = _CPP_TO_NP_MAP.get(api_name)
+    if map_entry is not None:
+        np_path, _rewrite = map_entry
+        if np_path is None:
+            np_fn = None
+        else:
+            np_parts = np_path.split(".")
+    if np_fn is not None:
+        for part in np_parts:
+            try:
+                np_fn = getattr(np_fn, part)
+            except AttributeError:
+                np_fn = None
+                break
+    cpp_result = cpp_fn(*args, **kwargs)
+    py_result = np_fn(*args, **kwargs) if np_fn is not None else None
+    return cpp_result, py_result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 基础工具
+# ═══════════════════════════════════════════════════════════════════════════════
+
+TestCase = namedtuple('TestCase', [
+    'api_name',     # API 名称
+    'args',         # 位置参数 tuple
+    'kwargs',       # 关键字参数 dict
+    'dtype_label',  # dtype 标签 (用于 pytest ID)
+    'category',     # 极端数据类别
+    'cmp_strategy', # 比较策略
+    'check_py',     # 是否比对 numpy
+    'setup_fn',     # 前置/后置处理函数 or None
+    'group',        # 大类: elementwise/init/linalg/manipulation/reduce
+], defaults=("",))
+
+
+def _seed(shape, *extras):
+    """返回非负确定性种子。h = hash(shape) 或 hash((shape, *extras))。"""
+    h = hash((shape,) + extras) if extras else hash(shape)
+    return h & 0x7FFFFFFF
+
+
+def _random_array(shape, dtype=np.float64, seed=42):
+    """确定性的随机数组。"""
+    rng = np.random.RandomState((seed + _seed(shape)) % (2**31))
     if np.issubdtype(dtype, np.floating):
         return rng.randn(*shape).astype(dtype)
     elif dtype == bool:
@@ -122,35 +197,497 @@ def random_array(shape, dtype=np.float64, seed: int = 42):
         return rng.randint(0, 100, size=shape).astype(dtype)
 
 
-def _dtype_val(v_f64, v_f32, dtype):
-    """Return value cast to dtype."""
-    return v_f64 if dtype == np.float64 else dtype(v_f32)
+def _make_extreme(shape, dtype, category, seed=42):
+    """生成指定类别的极端数据。"""
+    rng = np.random.RandomState((seed + _seed(shape, category)) % (2**31))
+    n = int(np.prod(shape)) if shape else 0
+
+    if category == "random":
+        return _random_array(shape, dtype, seed)
+    if category == "zeros":
+        return np.zeros(shape, dtype=dtype)
+    if category == "ones":
+        return np.ones(shape, dtype=dtype)
+    if category == "nan":
+        return np.full(shape, np.nan, dtype=dtype)
+    if category == "mixed_nan":
+        a = _random_array(shape, dtype, seed)
+        a.flat[::3] = np.nan
+        return a
+    if category == "inf":
+        return np.array([np.inf, -np.inf] * ((n + 1) // 2), dtype=dtype)[:n].reshape(shape)
+    if category == "mixed_inf":
+        a = _random_array(shape, dtype, seed)
+        a.flat[::4] = np.inf
+        a.flat[1::4] = -np.inf
+        return a
+    if category == "signed_zero":
+        return np.array([0.0, -0.0] * ((n + 1) // 2), dtype=dtype)[:n].reshape(shape)
+    if category == "domain_edge":
+        return (np.abs(_random_array(shape, dtype, seed)) * 0.1 + 0.01).astype(dtype)
+    if category == "large":
+        return (_random_array(shape, dtype, seed) * 1e150).astype(dtype)
+    if category == "tiny":
+        return (_random_array(shape, dtype, seed) * 1e-150).astype(dtype)
+    if category == "empty":
+        empty_shape = list(shape)
+        empty_shape[0] = 0
+        return np.empty(empty_shape, dtype=dtype)
+    return _random_array(shape, dtype, seed)
 
 
-# ============================================================================
-# C++ module fixture (lazy import, session-scoped)
-# ============================================================================
+# 一元浮点 API 的输入预处理（确保值在定义域内）
+_PREP_INPUT = {
+    "sqrt":   lambda a: np.abs(a),
+    "log":    lambda a: np.abs(a) + 0.1,
+    "log10":  lambda a: np.abs(a) + 0.1,
+    "log2":   lambda a: np.abs(a) + 0.1,
+    "log1p":  lambda a: np.abs(a) + 0.1,
+    "arcsin": lambda a: np.clip(a * 0.5, -1, 1),
+    "arccos": lambda a: np.clip(a * 0.5, -1, 1),
+    "tan":    lambda a: a * 0.5,
+    "expm1":  lambda a: a * 2.0,
+    "round":  lambda a: a * 100,
+    "floor":  lambda a: a * 100,
+    "ceil":   lambda a: a * 100,
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# F5: api_catalog() — 5大类工厂函数
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── 第1类: elementwise (elementwise_py.h, 43 APIs) ───────────────────────────
+
+_UNARY_FLOAT = [
+    "sqrt", "abs", "exp", "log", "sin", "cos", "tan",
+    "cbrt", "expm1", "log1p", "log10", "log2",
+    "arcsin", "arccos", "arctan",
+    "round", "floor", "ceil", "degrees", "radians", "sign", "reciprocal",
+]
+_UNARY_SHAPES = [(100,), (10000,)]
+_UNARY_CATS  = ["random", "nan", "mixed_nan", "inf", "signed_zero", "zeros", "domain_edge"]
+
+
+def _catalog_elementwise():
+    """elementwise_py.h — 一元浮点 / 二元 / 比较 / 逻辑 / 特殊值 / 类型转换"""
+    # ── 一元浮点 (21 APIs) ──
+    for name in _UNARY_FLOAT:
+        for dt in (np.float64, np.float32):
+            dn = dt.__name__
+            prep = _PREP_INPUT.get(name, lambda a: a)
+            # 常规尺寸 + 极端数据
+            for shape in _UNARY_SHAPES:
+                for cat in _UNARY_CATS:
+                    raw = _make_extreme(shape, dt, cat, seed=hash(name))
+                    yield TestCase(name, (prep(raw),), {}, dn, f"{cat}_{shape[0]}",
+                                   "bit_exact", True, None)
+            # AVX-512 边界尺寸
+            for sz in ([16, 17] if dt == np.float32 else [8, 9]):
+                raw = _make_extreme((sz,), dt, "random", seed=hash(name))
+                yield TestCase(name, (prep(raw),), {}, dn, f"avx512_n{sz}",
+                               "bit_exact", True, None)
+
+    # ── 二元标量: power, maximum(s), minimum(s), arctan2(s) ──
+    for name, sv in [("power", 2.0), ("power", 3.0), ("power", 0.5),
+                     ("maximum", 0.0), ("minimum", 0.0), ("arctan2", 1.0)]:
+        for dt in (np.float64, np.float32):
+            dn = dt.__name__
+            for shape in _UNARY_SHAPES:
+                a = _make_extreme(shape, dt, "random", seed=hash(name))
+                s = dt(sv)
+                yield TestCase(name, (a, s), {}, dn, f"random_{shape[0]}",
+                               "bit_exact", True, None)
+
+    # ── 三元: clip ──
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+        for lo, hi, tag in [(0.0, 1.0, "01"), (-1.0, 1.0, "m11"), (-10.0, 10.0, "m1010")]:
+            for shape in _UNARY_SHAPES:
+                a = _make_extreme(shape, dt, "random", seed=42)
+                yield TestCase("clip", (a, dt(lo), dt(hi)), {}, dn,
+                               f"{tag}_{shape[0]}", "bit_exact", True, None)
+
+    # ── 二元数组: hypot, arctan2(a), maximum(a), minimum(a) ──
+    for name in ["hypot", "arctan2", "maximum", "minimum"]:
+        for dt in (np.float64, np.float32):
+            dn = dt.__name__
+            for shape in [(100,), (10000,)]:
+                a = _make_extreme(shape, dt, "random", seed=1)
+                b = _make_extreme(shape, dt, "random", seed=2)
+                if name == "hypot":
+                    a, b = np.abs(a), np.abs(b)
+                yield TestCase(name, (a, b), {}, dn, f"random_{shape[0]}",
+                               "bit_exact", True, None)
+
+    # ── 比较: greater, less, equal, greater_equal, less_equal ──
+    for name in ["greater", "less", "equal", "greater_equal", "less_equal"]:
+        for dt in (np.float64, np.float32):
+            dn = dt.__name__
+            for shape in [(100,), (100000,)]:
+                a = _make_extreme(shape, dt, "random", seed=42)
+                yield TestCase(name, (a, dt(0.0)), {}, dn, f"vs0_{shape[0]}",
+                               "bit_exact", True, None)
+
+    # not_equal: scalar + array
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+        a = _make_extreme((100,), dt, "random", seed=42)
+        yield TestCase("not_equal", (a, dt(0.0)), {}, dn, "scalar",
+                       "bit_exact", True, None)
+        b = _make_extreme((100,), dt, "random", seed=99)
+        yield TestCase("not_equal", (a, b), {}, dn, "array",
+                       "bit_exact", True, None)
+
+    # ── 逻辑: logical_and/or/xor/not ──
+    for name in ["logical_and", "logical_or", "logical_xor"]:
+        a = np.array([True, True, False, False])
+        b = np.array([True, False, True, False])
+        yield TestCase(name, (a, b), {}, "bool", "basic", "bit_exact", True, None)
+    yield TestCase("logical_not", (np.array([True, False, True]),), {},
+                   "bool", "basic", "bit_exact", True, None)
+
+    # ── 特殊值检测: isnan, isinf, isfinite ──
+    for name in ["isnan", "isinf", "isfinite"]:
+        for dt in (np.float64, np.float32):
+            dn = dt.__name__
+            a = np.array([0.0, np.nan, np.inf, -np.inf, 1.0], dtype=dt)
+            yield TestCase(name, (a,), {}, dn, "special", "bit_exact", True, None)
+
+    # ── 类型转换: astype ──
+    _ASTYPE_CONVS = [
+        (np.float64, "int"), (np.float64, "bool"), (np.float64, "float32"),
+        (np.int32, "bool"), (np.int32, "float64"), (np.float32, "float64"),
+        (bool, "float64"), (bool, "int"),
+    ]
+    for src_dt, dst_str in _ASTYPE_CONVS:
+        if src_dt == bool:
+            a = np.array([True, False, True, False], dtype=bool)
+        elif src_dt == np.int32:
+            a = np.array([0, 1, -1, 42], dtype=np.int32)
+        else:
+            a = _make_extreme((100,), src_dt, "random", seed=42)
+        yield TestCase("astype", (a, dst_str), {}, src_dt.__name__,
+                       f"to_{dst_str}", "bit_exact", True, None)
+
+
+# ── 第2类: init (init_py.h, 15 APIs) ─────────────────────────────────────────
+
+def _catalog_init():
+    """init_py.h — like创建 / shape创建 / 范围生成 / 矩阵创建"""
+    # zeros_like, ones_like, empty_like, full_like
+    for name in ["zeros_like", "ones_like", "empty_like", "full_like"]:
+        for dt in (np.float64, np.float32):
+            dn = dt.__name__
+            for shape in [(3, 4), (5,)]:
+                a = _make_extreme(shape, dt, "random", seed=42)
+                if name == "full_like":
+                    yield TestCase(name, (a, dt(3.14)), {}, dn, f"{shape}",
+                                   "bit_exact", True, None)
+                else:
+                    yield TestCase(name, (a,), {}, dn, f"{shape}",
+                                   "bit_exact" if name != "empty_like" else "shape_only",
+                                   True, None)
+
+    # zeros, ones, full, empty
+    for shape in [(5,), (3, 4), (2, 3, 4)]:
+        yield TestCase("zeros", (list(shape),), {}, "f64", str(shape),
+                       "bit_exact", True, None)
+        yield TestCase("ones",  (list(shape),), {}, "f64", str(shape),
+                       "bit_exact", True, None)
+        yield TestCase("full",  (list(shape), 3.14), {}, "f64", str(shape),
+                       "bit_exact", True, None)
+        yield TestCase("empty", (list(shape),), {}, "f64", str(shape),
+                       "shape_only", True, None)
+
+    # arange
+    for args, tag in [((10,), "10"), ((1, 10), "1_10"), ((0, 10, 2), "0_10_2"),
+                       ((0.5, 5.5, 0.5), "step05"), ((-3, 3, 1), "neg")]:
+        yield TestCase("arange", args, {}, "f64", tag, "bit_exact", True, None)
+
+    # linspace
+    for s, e, n, ep, tag in [(0.0, 1.0, 50, True, "50T"), (0.0, 1.0, 50, False, "50F"),
+                              (0.0, 0.0, 3, True, "degen"), (0.0, 1.0, 0, True, "empty")]:
+        yield TestCase("linspace", (s, e, n, ep), {}, "f64", tag, "bit_exact", True, None)
+
+    # logspace
+    for s, e, n, ep, base, tag in [(0.0, 2.0, 5, True, 10.0, "T10"),
+                                     (0.0, 1.0, 4, True, 2.0, "T2")]:
+        yield TestCase("logspace", (s, e, n, ep, base), {}, "f64", tag, "bit_exact", True, None)
+
+    # geomspace
+    for s, e, n, ep, tag in [(1.0, 1000.0, 4, True, "T"),
+                               (1.0, 256.0, 9, True, "9")]:
+        yield TestCase("geomspace", (s, e, n, ep), {}, "f64", tag, "bit_exact", True, None)
+
+    # eye — M=None (不传) = 方阵，严格对齐 numpy API
+    yield TestCase("eye", (3,), {"k": 0}, "f64", "3", "bit_exact", True, None)
+    yield TestCase("eye", (3,), {"k": 1}, "f64", "3_k1", "bit_exact", True, None)
+    for M, tag in [(5, "3x5"), (3, "5x3")]:
+        N = 3 if M == 5 else 5
+        yield TestCase("eye", (N, M, 0), {}, "f64", tag, "bit_exact", True, None)
+
+    # identity
+    for n in [1, 3, 5]:
+        yield TestCase("identity", (n,), {}, "f64", str(n), "bit_exact", True, None)
+
+    # diag
+    v = np.array([1.0, 2.0, 3.0])
+    for k in [-2, -1, 0, 1, 2]:
+        yield TestCase("diag", (v, k), {}, "f64", f"vec_k{k}", "bit_exact", True, None)
+    m = np.arange(16.0).reshape(4, 4)
+    yield TestCase("diag", (m, 0), {}, "f64", "mat_k0", "bit_exact", True, None)
+
+
+# ── 第3类: linalg (linalg_py.h, 6 APIs) ──────────────────────────────────────
+
+def _catalog_linalg():
+    """linalg_py.h — norm / inv / dot / matmul / einsum"""
+    # linalg.norm — scalar
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+        for shape in [(100,), (5, 4)]:
+            a = _make_extreme(shape, dt, "random", seed=42)
+            yield TestCase("linalg.norm", (a,), {}, dn, str(shape),
+                           "bit_exact", True, None)
+        yield TestCase("linalg.norm", (np.zeros(100, dtype=dt),), {}, dn, "zero",
+                       "bit_exact", True, None)
+        for cat in ["nan", "inf"]:
+            a = _make_extreme((10,), dt, cat, seed=42)
+            yield TestCase("linalg.norm", (a,), {}, dn, cat,
+                           "nan_mask" if cat == "nan" else "bit_exact", True, None)
+
+    # linalg.norm — axis
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+        a = _make_extreme((5, 4), dt, "random", seed=42)
+        yield TestCase("linalg.norm", (a,), {"axis": 1}, dn, "axis1",
+                       "bit_exact", True, None)
+
+    # linalg.inv
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+        yield TestCase("linalg.inv", (np.eye(4, dtype=dt),), {}, dn, "eye",
+                       "bit_exact", True, None)
+        yield TestCase("linalg.inv", (_make_extreme((4, 4), dt, "random", seed=42),),
+                       {}, dn, "random4x4", "bit_exact", True, None)
+    # 3x3, 8x8 float64 only
+    for sz in [3, 8]:
+        a = _make_extreme((sz, sz), np.float64, "random", seed=42)
+        yield TestCase("linalg.inv", (a,), {}, "float64", f"random{sz}x{sz}",
+                       "bit_exact", True, None)
+
+    # dot
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+        a = _make_extreme((100,), dt, "random", seed=1)
+        b = _make_extreme((100,), dt, "random", seed=2)
+        yield TestCase("dot", (a, b), {}, dn, "random", "bit_exact", True, None)
+
+    # matmul
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+        for M, K, N in [(3, 4, 5), (16, 16, 16), (100, 100, 100)]:
+            a = _make_extreme((M, K), dt, "random", seed=M*100+K)
+            b = _make_extreme((K, N), dt, "random", seed=K*100+N)
+            yield TestCase("matmul", (a, b), {}, dn, f"2d_{M}x{K}x{N}",
+                           "bit_exact", True, None)
+
+    # einsum — 6种下标模式
+    _EINSUM = [
+        ("ij,ij->i",   (3, 2), (3, 2)),
+        ("ij,jk->ik",  (3, 4), (4, 5)),
+        ("bij,bjk->bik", (2, 3, 4), (2, 4, 5)),
+        ("aij,aij->ai",  (3, 5, 4), (3, 5, 4)),
+        ("ij,ij",     (3, 2), (3, 2)),
+        ("ij,jk",     (3, 4), (4, 5)),
+    ]
+    for sub, sa, sb in _EINSUM:
+        for dt in (np.float64, np.float32):
+            dn = dt.__name__
+            a = _make_extreme(sa, dt, "random", seed=1)
+            b = _make_extreme(sb, dt, "random", seed=2)
+            tag = sub.replace(",", "_").replace("->", "__")
+            yield TestCase("einsum", (sub, a, b), {}, dn, tag,
+                           "bit_exact", True, None)
+
+
+# ── 第4类: manipulation (manipulation_py.h, 26 APIs) ─────────────────────────
+
+def _catalog_manipulation():
+    """manipulation_py.h — 形状变换 / 重排 / 排序 / 切片 / 高级索引"""
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+
+        # diff
+        for ax, tag in [(0, "ax0"), (1, "ax1"), (-1, "ax-1")]:
+            a = _make_extreme((5, 4), dt, "random", seed=42)
+            yield TestCase("diff", (a,), {"n": 1, "axis": ax}, dn, tag,
+                           "bit_exact", True, None)
+
+        # transpose, flatten
+        a = _make_extreme((3, 5), dt, "random", seed=42)
+        yield TestCase("transpose", (a,), {}, dn, "2d", "bit_exact", True, None)
+        yield TestCase("flatten", (a,), {}, dn, "2d", "bit_exact", True, None)
+
+        # squeeze
+        for sh, tag in [((3, 1), "col"), ((1, 3), "row"), ((1, 2, 1, 2, 1), "multi")]:
+            yield TestCase("squeeze", (_make_extreme(sh, dt, "random", seed=42),),
+                           {}, dn, tag, "bit_exact", True, None)
+
+        # stack, concatenate
+        arrays = [_make_extreme((3,), dt, "random", seed=i) for i in range(4)]
+        yield TestCase("stack", (arrays,), {}, dn, "4x3", "bit_exact", True, None)
+        for ax, tag in [(0, "ax0"), (1, "ax1"), (-1, "ax-1")]:
+            arrays2 = [_make_extreme((3, 2), dt, "random", seed=i) for i in range(3)]
+            yield TestCase("concatenate", (arrays2,), {"axis": ax}, dn, tag,
+                           "bit_exact", True, None)
+
+        # vstack, hstack
+        arrays1d = [_make_extreme((3,), dt, "random", seed=i) for i in range(4)]
+        yield TestCase("vstack", (arrays1d,), {}, dn, "1d", "bit_exact", True, None)
+        yield TestCase("hstack", (arrays1d,), {}, dn, "1d", "bit_exact", True, None)
+
+        # where
+        cond = np.array([True, False, True, False, True])
+        yield TestCase("where", (cond, dt(10.0), dt(-1.0)), {}, dn, "scalar",
+                       "bit_exact", True, None)
+        yield TestCase("where", (cond,
+                                 _make_extreme((5,), dt, "random", seed=1),
+                                 _make_extreme((5,), dt, "random", seed=2)),
+                       {}, dn, "array", "bit_exact", True, None)
+
+        # roll, flip, repeat, tile
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dt)
+        yield TestCase("roll", (a, 2), {}, dn, "+2", "bit_exact", True, None)
+        yield TestCase("flip", (a[:4],), {}, dn, "4", "bit_exact", True, None)
+        yield TestCase("repeat", (a[:3], 3), {}, dn, "x3", "bit_exact", True, None)
+        yield TestCase("tile", (a[:3], 2), {}, dn, "x2", "bit_exact", True, None)
+
+        # argsort
+        a = np.array([3.0, 1.0, 4.0, 1.0, 5.0], dtype=dt)
+        yield TestCase("argsort", (a,), {}, dn, "basic", "bit_exact", True, None)
+
+        # cumsum
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dt)
+        yield TestCase("cumsum", (a,), {}, dn, "basic", "bit_exact", True, None)
+
+        # slice 2-arg
+        a = _make_extreme((10, 3), dt, "random", seed=42)
+        yield TestCase("slice", (a, 2, 7), {}, dn, "2:7", "bit_exact", True, None)
+        yield TestCase("slice", (a, 0, 5), {}, dn, ":5", "bit_exact", True, None)
+
+        # slice N-D
+        a = _make_extreme((6, 8), dt, "random", seed=42)
+        yield TestCase("slice", (a, [1, 2], [3, 5], [1, 1]), {}, dn, "nd_1:3_2:5",
+                       "bit_exact", True, None)
+
+        # take
+        a = _make_extreme((5, 7), dt, "random", seed=42)
+        idx = np.array([0, 2, 4], dtype=np.int64)
+        yield TestCase("take", (a, idx, 0), {}, dn, "rows", "bit_exact", True, None)
+        yield TestCase("take", (a, idx, 1), {}, dn, "cols", "bit_exact", True, None)
+
+        # compress — condition FIRST, matching numpy np.compress(condition, a)
+        mask = np.array([True, False, True, False, True])
+        yield TestCase("compress", (mask, _make_extreme((5,), dt, "random", seed=42)),
+                       {}, dn, "basic", "bit_exact", True, None)
+
+    # argmax, argmin
+    for name in ["argmax", "argmin"]:
+        for dt in (np.float64, np.float32):
+            dn = dt.__name__
+            yield TestCase(name, (_make_extreme((100,), dt, "random", seed=42),),
+                           {}, dn, "random", "scalar_eq", True, None)
+
+
+# ── 第5类: reduce (reduce_py.h, 10 APIs) ─────────────────────────────────────
+
+def _catalog_reduce():
+    """reduce_py.h — 标量归约 / 轴归约 / 布尔归约"""
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+
+        # sum, max, min
+        for name in ["sum", "max", "min"]:
+            a = _make_extreme((100,), dt, "random", seed=42)
+            yield TestCase(name, (a,), {}, dn, "random", "scalar_eq", True, None)
+            yield TestCase(name, (np.zeros(10, dtype=dt),), {}, dn, "zeros",
+                           "scalar_eq", True, None)
+
+        # std, var — large size float64 only
+        for name in ["std", "var"]:
+            a = _make_extreme((100,), dt, "random", seed=42)
+            yield TestCase(name, (a,), {}, dn, "random", "scalar_eq", True, None)
+            yield TestCase(name, (np.ones(50, dtype=dt) * dt(3.0),), {}, dn, "const",
+                           "scalar_eq", True, None)
+        if dt == np.float64:
+            for name in ["std", "var"]:
+                yield TestCase(name, (_make_extreme((10000,), dt, "random", seed=7),),
+                               {}, "float64", "large", "scalar_eq", True, None)
+
+        # mean — scalar
+        yield TestCase("mean", (_make_extreme((100,), dt, "random", seed=42),),
+                       {}, dn, "scalar", "scalar_eq", True, None)
+        # mean — axis
+        for ax, tag in [(0, "ax0"), (1, "ax1"), (-1, "ax-1")]:
+            yield TestCase("mean", (_make_extreme((4, 5), dt, "random", seed=42),),
+                           {"axis": ax}, dn, tag, "bit_exact", True, None)
+
+    # any, all
+    for name in ["any", "all"]:
+        yield TestCase(name, (np.array([True, False, True, False]),), {}, "bool", "mixed",
+                       "scalar_eq", True, None)
+        yield TestCase(name, (np.array([True, True, True]),), {}, "bool", "all_true",
+                       "scalar_eq", True, None)
+
+    # cumsum
+    for dt in (np.float64, np.float32):
+        dn = dt.__name__
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dt)
+        yield TestCase("cumsum", (a,), {}, dn, "basic", "bit_exact", True, None)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# api_catalog() — 汇总入口
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def api_catalog():
+    """导出 numpypcpp 全部 API 的测试用例目录。"""
+    for tc in _catalog_elementwise():
+        yield tc._replace(group="elementwise")
+    for tc in _catalog_init():
+        yield tc._replace(group="init")
+    for tc in _catalog_linalg():
+        yield tc._replace(group="linalg")
+    for tc in _catalog_manipulation():
+        yield tc._replace(group="manipulation")
+    for tc in _catalog_reduce():
+        yield tc._replace(group="reduce")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 模块加载
+# ═══════════════════════════════════════════════════════════════════════════════
 
 _cpp_module = None
 _import_error = None
 
 
-def _resolve_module_name() -> str:
-    cli_mod = getattr(pytest, "_numpycpp_module_name", None)
-    if cli_mod: return cli_mod
-    env = os.environ.get("NUMPYCPP_MODULE")
-    if env: return env
-    return "numpycpp"
+def _resolve_module_name():
+    return (getattr(pytest, "_numpycpp_module_name", None)
+            or os.environ.get("NUMPYCPP_MODULE")
+            or "numpycpp")
 
 
 def get_cpp_module():
-    """Return the compiled numpycpp C++ module (lazy, cached)."""
     global _cpp_module, _import_error
-    if _cpp_module is not None: return _cpp_module
-    if _import_error is not None: raise _import_error
-    modname = _resolve_module_name()
+    if _cpp_module is not None:
+        return _cpp_module
+    if _import_error is not None:
+        raise _import_error
     try:
-        _cpp_module = importlib.import_module(modname)
+        _cpp_module = importlib.import_module(_resolve_module_name())
     except ImportError as e:
         _import_error = e
         raise
@@ -162,2226 +699,112 @@ def cpp():
     return get_cpp_module()
 
 
-@pytest.fixture(params=[np.float64, np.float32], ids=["float64", "float32"])
-def dtype(request):
-    return request.param
-
-
-# ============================================================================
-# 1. Data-driven element-wise unary math
-# ============================================================================
-# Each entry: (cpp_fn_name, np_fn, input_prep, sizes)
-#   input_prep: None → random_array directly; else callable: prep(a) → input
-#   sizes: list of (size, seed) tuples
-#
-# All functions (including transcendental) are bit-exact on EVERY architecture
-# via numpy's own scalar math functions (npy_exp, npy_log, ...) resolved from
-# _multiarray_umath.so by the SVML bridge. No AVX-512 required.
-
-_UNARY_MATH = [
-    ("sqrt",       np.sqrt,       lambda a: np.abs(a),                [(100, 42), (10000, 7), (100000, 7)]),
-    ("abs",        np.abs,        None,                               [(100, 42), (10000, 7), (100000, 7)]),
-    ("exp",        np.exp,        None,                               [(100, 1),  (1000, 7), (10000, 7), (100000, 7)]),
-    ("log",        np.log,        lambda a: np.abs(a) + 0.1,          [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("sin",        np.sin,        None,                               [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("cos",        np.cos,        None,                               [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("tan",        np.tan,        lambda a: a * 0.5,                  [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("cbrt",       np.cbrt,       None,                               [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("expm1",      np.expm1,      lambda a: a * 2.0,                  [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("log1p",      np.log1p,      lambda a: np.abs(a) + 0.1,          [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("log10",      np.log10,      lambda a: np.abs(a) + 0.1,          [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("log2",       np.log2,       lambda a: np.abs(a) + 0.1,          [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("arcsin",     np.arcsin,     lambda a: np.clip(a * 0.5, -1, 1),  [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("arccos",     np.arccos,     lambda a: np.clip(a * 0.5, -1, 1),  [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("arctan",     np.arctan,     None,                               [(100, 42), (1000, 7), (10000, 7), (100000, 7)]),
-    ("round",      np.round,      lambda a: a * 100,                  [(100, 42), (10000, 7), (100000, 7)]),
-    ("floor",      np.floor,      lambda a: a * 100,                  [(100, 42), (10000, 7), (100000, 7)]),
-    ("ceil",       np.ceil,       lambda a: a * 100,                  [(100, 42), (10000, 7), (100000, 7)]),
-    ("degrees",    np.degrees,    None,                               [(100, 42), (10000, 7), (100000, 7)]),
-    ("radians",    np.radians,    None,                               [(100, 42), (10000, 7), (100000, 7)]),
-    ("sign",       np.sign,       None,                               [(100, 42), (10000, 7), (100000, 7)]),
-]
-
-
-# Build parametrize tables at module level
-_UNARY_ARGS = []
-_UNARY_IDS = []
-for fn, npf, prep, sizes in _UNARY_MATH:
-    for size, seed in sizes:
-        tag = f"{fn}_{size}"
-        if seed != 42: tag += f"_s{seed}"
-        _UNARY_IDS.append(tag)
-        _UNARY_ARGS.append(pytest.param(fn, npf, prep, size, seed, id=tag))
-
-
-@pytest.mark.parametrize("fn_name, np_fn, prep, size, seed", _UNARY_ARGS)
-def test_unary_math(fn_name, np_fn, prep, size, seed, cpp, dtype):
-    a = random_array((size,), seed=seed, dtype=dtype)
-    inp = prep(a) if prep else a
-    cpp_fn = getattr(cpp, fn_name)
-    assert_bit_aligned(cpp_fn(inp), np_fn(inp), fn_name)
-
-
-# Special: sqrt and sign zero tests
-def test_sqrt_zero(cpp, dtype):
-    a = np.zeros((5,), dtype=dtype)
-    assert_bit_aligned(cpp.sqrt(a), np.sqrt(a), "sqrt zero")
-
-def test_sign_zero(cpp, dtype):
-    a = np.array([0.0, -0.0, 0.0], dtype=dtype)
-    assert_bit_aligned(cpp.sign(a), np.sign(a), "sign zero")
-
-
-# Power
-@pytest.mark.parametrize("expval,size,seed", [
-    (2.0, 10, 42), (3.0, 10, 42), (0.5, 10, 42), (-1.0, 10, 42), (0.0, 10, 42),
-    (2.0, 10000, 7), (3.0, 10000, 7), (0.5, 10000, 7), (-1.0, 10000, 7),
-])
-def test_power(expval, size, seed, cpp, dtype):
-    e = dtype(expval)
-    a = np.abs(random_array((size,), seed=seed, dtype=dtype)) + dtype(0.01)
-    assert_bit_aligned(cpp.power(a, e), np.power(a, e), f"power({expval})_{size}")
-
-
-# Clip
-@pytest.mark.parametrize("lo,hi,size", [
-    (0.0, 1.0, 20), (-1.0, 1.0, 20), (0.5, 0.5, 20), (-10.0, 10.0, 20),
-    (0.0, 1.0, 10000), (-100.0, 100.0, 10000),
-])
-def test_clip(lo, hi, size, cpp, dtype):
-    l, h = dtype(lo), dtype(hi)
-    a = random_array((size,), seed=(7 if size > 100 else 42), dtype=dtype)
-    assert_bit_aligned(cpp.clip(a, l, h), np.clip(a, l, h), f"clip({lo},{hi})_{size}")
-
-
-# ============================================================================
-# 2. Data-driven comparisons
-# ============================================================================
-
-_COMPARISONS = [
-    ("greater",       np.greater),
-    ("less",          np.less),
-    ("greater_equal", np.greater_equal),
-    ("less_equal",    np.less_equal),
-]
-
-
-_COMP_ARGS = [(fn, npf, size, seed) for fn, npf in _COMPARISONS for size, seed in [(100, 42), (100000, 7)]]
-_COMP_IDS = [f"{fn}_{size}" for fn, npf in _COMPARISONS for size, seed in [(100, 42), (100000, 7)]]
-
-
-@pytest.mark.parametrize("fn_name, np_fn, size, seed", _COMP_ARGS, ids=_COMP_IDS)
-def test_comparison(fn_name, np_fn, size, seed, cpp, dtype):
-    a = random_array((size,), seed=seed, dtype=dtype)
-    cpp_fn = getattr(cpp, fn_name)
-    assert_bit_aligned(cpp_fn(a, dtype(0.0)), np_fn(a, dtype(0.0)), fn_name)
-
-
-def test_equal(cpp, dtype):
-    a = np.array([0.0, 1.0, 1.0, 0.0], dtype=dtype)
-    assert_bit_aligned(cpp.equal(a, dtype(1.0)), np.equal(a, dtype(1.0)), "equal")
-
-def test_equal_large(cpp, dtype):
-    a = random_array((100000,), seed=7, dtype=dtype)
-    assert_bit_aligned(cpp.equal(a, dtype(0.0)), np.equal(a, dtype(0.0)), "equal large")
-
-
-def test_not_equal_scalar(cpp, dtype):
-    a = np.array([0.0, 1.0, 0.0], dtype=dtype)
-    assert_bit_aligned(cpp.not_equal(a, dtype(0.0)), np.not_equal(a, dtype(0.0)), "not_equal scalar")
-
-def test_not_equal_array(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    b = random_array((100,), seed=99, dtype=dtype)
-    assert_bit_aligned(cpp.not_equal(a, b), np.not_equal(a, b), "not_equal array")
-
-def test_not_equal_large(cpp, dtype):
-    a = random_array((100000,), seed=7, dtype=dtype)
-    b = random_array((100000,), seed=99, dtype=dtype)
-    assert_bit_aligned(cpp.not_equal(a, b), np.not_equal(a, b), "not_equal large")
-
-
-# ============================================================================
-# 3. Data-driven binary element-wise
-# ============================================================================
-
-def test_maximum_array(cpp, dtype):
-    a = random_array((100,), seed=1, dtype=dtype)
-    b = random_array((100,), seed=2, dtype=dtype)
-    assert_bit_aligned(cpp.maximum(a, b), np.maximum(a, b), "maximum(a,b)")
-
-def test_maximum_scalar(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    assert_bit_aligned(cpp.maximum(a, dtype(0.0)), np.maximum(a, dtype(0.0)), "maximum(a,0)")
-
-def test_maximum_large(cpp, dtype):
-    a = random_array((100000,), seed=7, dtype=dtype)
-    b = random_array((100000,), seed=99, dtype=dtype)
-    assert_bit_aligned(cpp.maximum(a, b), np.maximum(a, b), "maximum large")
-
-def test_minimum_array(cpp, dtype):
-    a = random_array((100,), seed=1, dtype=dtype)
-    b = random_array((100,), seed=2, dtype=dtype)
-    assert_bit_aligned(cpp.minimum(a, b), np.minimum(a, b), "minimum(a,b)")
-
-def test_minimum_scalar(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    assert_bit_aligned(cpp.minimum(a, dtype(0.0)), np.minimum(a, dtype(0.0)), "minimum(a,0)")
-
-def test_minimum_large(cpp, dtype):
-    a = random_array((100000,), seed=7, dtype=dtype)
-    b = random_array((100000,), seed=99, dtype=dtype)
-    assert_bit_aligned(cpp.minimum(a, b), np.minimum(a, b), "minimum large")
-
-def test_arctan2_array(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    b = np.abs(random_array((100,), dtype=dtype)) + dtype(0.1)
-    assert_bit_aligned(cpp.arctan2(a, b), np.arctan2(a, b), "arctan2(a,b)")
-
-def test_arctan2_scalar(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    assert_bit_aligned(cpp.arctan2(a, dtype(1.0)), np.arctan2(a, dtype(1.0)), "arctan2(a,1)")
-
-def test_arctan2_large(cpp, dtype):
-    a = random_array((10000,), seed=7, dtype=dtype)
-    b = np.abs(random_array((10000,), seed=99, dtype=dtype)) + dtype(0.1)
-    assert_bit_aligned(cpp.arctan2(a, b), np.arctan2(a, b), "arctan2 large")
-
-
-# ============================================================================
-# 4. Reductions
-# ============================================================================
-
-def test_sum_1d(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    assert cpp.sum(a) == np.sum(a), "sum 1d"
-
-def test_sum_2d(cpp, dtype):
-    a = random_array((5, 4), dtype=dtype)
-    assert cpp.sum(a) == np.sum(a), "sum 2d"
-
-def test_sum_empty(cpp, dtype):
-    a = np.array([], dtype=dtype)
-    assert cpp.sum(a) == dtype(0), "sum empty"
-
-
-def test_mean_1d(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    assert_bit_aligned(np.float64(cpp.mean(a)), np.float64(np.mean(a)), "mean 1d")
-
-def test_mean_empty(cpp, dtype):
-    assert np.float64(cpp.mean(np.array([], dtype=dtype))) == 0.0, "mean empty"
-
-
-def test_max_1d(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    assert cpp.max(a) == np.max(a), "max 1d"
-
-def test_max_large(cpp, dtype):
-    a = random_array((100000,), seed=7, dtype=dtype)
-    assert cpp.max(a) == np.max(a), "max large"
-
-def test_min_1d(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    assert cpp.min(a) == np.min(a), "min 1d"
-
-def test_min_large(cpp, dtype):
-    a = random_array((100000,), seed=7, dtype=dtype)
-    assert cpp.min(a) == np.min(a), "min large"
-
-
-# ============================================================================
-# 5. Statistical
-# ============================================================================
-
-def test_std_random(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    cpp_r, py_r = cpp.std(a), np.std(a)
-    assert np.float64(cpp_r) == np.float64(py_r), f"std: {cpp_r} vs {py_r}"
-
-def test_std_constant(cpp, dtype):
-    a = np.ones((50,), dtype=dtype) * dtype(3.0)
-    cpp_r, py_r = cpp.std(a), np.std(a)
-    assert np.float64(cpp_r) == np.float64(py_r), f"std constant: {cpp_r} vs {py_r}"
-
-@pytest.mark.parametrize("size", [1000, 10000])
-def test_std_large(size, cpp):
-    """std large: float64 only — float32 ULP differences from summation order."""
-    a = random_array((size,), seed=7, dtype=np.float64)
-    cpp_r, py_r = cpp.std(a), np.std(a)
-    assert np.float64(cpp_r) == np.float64(py_r), f"std large {size}"
-
-def test_var_random(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    cpp_r, py_r = cpp.var(a), np.var(a)
-    assert np.float64(cpp_r) == np.float64(py_r), f"var: {cpp_r} vs {py_r}"
-
-@pytest.mark.parametrize("size", [1000, 10000])
-def test_var_large(size, cpp):
-    """var large: float64 only — float32 ULP differences from summation order."""
-    a = random_array((size,), seed=7, dtype=np.float64)
-    cpp_r, py_r = cpp.var(a), np.var(a)
-    assert np.float64(cpp_r) == np.float64(py_r), f"var large {size}"
-
-
-# ============================================================================
-# 6. Array creation
-# ============================================================================
-
-def test_zeros_like(cpp, dtype):
-    a = random_array((3, 4), dtype=dtype)
-    assert_bit_aligned(cpp.zeros_like(a), np.zeros_like(a), "zeros_like")
-
-@pytest.mark.parametrize("shape", [(1,), (5,), (2, 3), (4, 5, 6)])
-def test_zeros_like_shapes(shape, cpp, dtype):
-    a = random_array(shape, dtype=dtype)
-    assert_bit_aligned(cpp.zeros_like(a), np.zeros_like(a), f"zeros_like{shape}")
-
-def test_ones_like(cpp, dtype):
-    a = random_array((3, 4), dtype=dtype)
-    assert_bit_aligned(cpp.ones_like(a), np.ones_like(a), "ones_like")
-
-@pytest.mark.parametrize("shape", [(1,), (5,), (2, 3), (1, 1, 1)])
-def test_ones_like_shapes(shape, cpp, dtype):
-    a = random_array(shape, dtype=dtype)
-    assert_bit_aligned(cpp.ones_like(a), np.ones_like(a), f"ones_like{shape}")
-
-@pytest.mark.parametrize("v_f64,v_f32", [(0.0, 0.0), (1.0, 1.0), (-3.14, -3.14), (42.0, 42.0), (1e10, 1e10)])
-def test_full_like(v_f64, v_f32, cpp, dtype):
-    v = _dtype_val(v_f64, v_f32, dtype)
-    a = random_array((3, 4), dtype=dtype)
-    assert_bit_aligned(cpp.full_like(a, v), np.full_like(a, v), f"full_like({v})")
-
-def test_empty_like_shape(cpp, dtype):
-    a = random_array((3, 4), dtype=dtype)
-    assert np.asarray(cpp.empty_like(a)).shape == a.shape, "empty_like shape"
-
-@pytest.mark.parametrize("shape", [(5,), (3, 4), (2, 3, 4)])
-def test_zeros(shape, cpp):
-    assert_bit_aligned(cpp.zeros(shape), np.zeros(shape), f"zeros{shape}")
-
-@pytest.mark.parametrize("shape", [(5,), (3, 4), (2, 3, 4)])
-def test_ones(shape, cpp):
-    assert_bit_aligned(cpp.ones(shape), np.ones(shape), f"ones{shape}")
-
-@pytest.mark.parametrize("shape,fill_val", [((5,), 3.14), ((2, 3), -1.0), ((4,), 0.0)])
-def test_full(shape, fill_val, cpp):
-    assert_bit_aligned(cpp.full(list(shape), fill_val),
-                       np.full(shape, fill_val), f"full{shape}_{fill_val}")
-
-
-# ============================================================================
-# 7. Bool-specialized creation
-# ============================================================================
-
-@pytest.mark.parametrize("value", [True, False])
-def test_full_like_bool(value, cpp):
-    a = random_array((3, 4))
-    assert_bit_aligned(cpp.full_like(a, value),
-                       np.full_like(a, value, dtype=bool), f"full_like({value})")
-
-def test_zeros_like_bool(cpp):
-    a = random_array((3, 4))
-    assert_bit_aligned(cpp.zeros_like(a, "bool"), np.zeros_like(a, dtype=bool), "zeros_like")
-
-def test_ones_like_bool(cpp):
-    a = random_array((3, 4))
-    assert_bit_aligned(cpp.ones_like(a, "bool"), np.ones_like(a, dtype=bool), "ones_like")
-
-
-# ============================================================================
-# 7b. New creation routines: empty, arange, linspace, logspace, geomspace,
-#     eye, identity, diag
-# ============================================================================
-
-# -- empty -------------------------------------------------------------------
-
-@pytest.mark.parametrize("shape", [(5,), (3, 4)])
-def test_empty_shape(shape, cpp):
-    r = cpp.empty(list(shape))
-    assert r.shape == shape, f"empty{shape} shape"
-    assert r.dtype == np.float64, f"empty{shape} dtype"
-
-
-# -- arange ------------------------------------------------------------------
-
-@pytest.mark.parametrize("args,kwargs", [
-    ((10,),   {}),
-    ((1, 10), {}),
-    ((0, 10, 2), {}),
-    ((0.5, 5.5, 0.5), {}),
-    ((-3, 3, 1), {}),
-])
-def test_arange_f64(args, kwargs, cpp):
-    assert_bit_aligned(cpp.arange(*args, **kwargs), np.arange(*args, **kwargs),
-                       f"arange{args}")
-
-def test_arange_f32_inputs(cpp):
-    """numpy 1.23: arange with float32 inputs returns float64."""
-    s, e, st = np.float32(0), np.float32(10), np.float32(1)
-    r = cpp.arange(s, e, st)
-    assert r.dtype == np.float64, "arange(f32 inputs) dtype should be float64"
-    assert_bit_aligned(r, np.arange(s, e, st), "arange f32 inputs")
-
-def test_arange_single_arg(cpp):
-    assert_bit_aligned(cpp.arange(5.0), np.arange(5.0), "arange(5.0)")
-
-
-# -- linspace ----------------------------------------------------------------
-
-@pytest.mark.parametrize("start,stop,num,endpoint", [
-    (0.0, 1.0, 50, True),
-    (0.0, 1.0, 50, False),
-    (1.0, 10.0, 5, True),
-    (0.0, 0.0, 3, True),   # degenerate: same start/stop
-    (0.0, 1.0, 1, True),   # single point
-    (0.0, 1.0, 0, True),   # empty
-])
-def test_linspace_f64(start, stop, num, endpoint, cpp):
-    assert_bit_aligned(cpp.linspace(start, stop, num, endpoint),
-                       np.linspace(start, stop, num, endpoint=endpoint),
-                       f"linspace({start},{stop},{num},ep={endpoint})")
-
-def test_linspace_f32_inputs(cpp):
-    """numpy 1.23: linspace with float32 inputs returns float64."""
-    s, e = np.float32(0), np.float32(1)
-    r = cpp.linspace(s, e, 10)
-    assert r.dtype == np.float64, "linspace(f32 inputs) dtype should be float64"
-    assert_bit_aligned(r, np.linspace(s, e, 10), "linspace f32 inputs")
-
-
-# -- logspace ----------------------------------------------------------------
-
-@pytest.mark.parametrize("start,stop,num,endpoint,base", [
-    (0.0, 2.0, 5, True, 10.0),
-    (0.0, 2.0, 5, False, 10.0),
-    (0.0, 1.0, 4, True, 2.0),
-])
-def test_logspace_f64(start, stop, num, endpoint, base, cpp):
-    assert_bit_aligned(cpp.logspace(start, stop, num, endpoint, base),
-                       np.logspace(start, stop, num, endpoint=endpoint, base=base),
-                       f"logspace({start},{stop},{num},ep={endpoint},base={base})")
-
-def test_logspace_f32_inputs(cpp):
-    """numpy 1.23: logspace with float32 inputs returns float64."""
-    s, e = np.float32(0), np.float32(2)
-    r = cpp.logspace(s, e, 5)
-    assert r.dtype == np.float64, "logspace(f32 inputs) dtype should be float64"
-    assert_bit_aligned(r, np.logspace(s, e, 5), "logspace f32 inputs")
-
-
-# -- geomspace ---------------------------------------------------------------
-
-@pytest.mark.parametrize("start,stop,num,endpoint", [
-    (1.0, 1000.0, 4, True),
-    (1.0, 1000.0, 4, False),
-    (1.0, 256.0, 9, True),
-])
-def test_geomspace_f64(start, stop, num, endpoint, cpp):
-    assert_bit_aligned(cpp.geomspace(start, stop, num, endpoint),
-                       np.geomspace(start, stop, num, endpoint=endpoint),
-                       f"geomspace({start},{stop},{num},ep={endpoint})")
-
-def test_geomspace_f32_inputs(cpp):
-    """numpy 1.23: geomspace with float32 inputs returns float64."""
-    s, e = np.float32(1), np.float32(1000)
-    r = cpp.geomspace(s, e, 4)
-    assert r.dtype == np.float64, "geomspace(f32 inputs) dtype should be float64"
-    assert_bit_aligned(r, np.geomspace(s, e, 4), "geomspace f32 inputs")
-
-
-# -- eye ---------------------------------------------------------------------
-
-@pytest.mark.parametrize("N,M,k", [
-    (3, -1, 0),   # square, k=0
-    (3, -1, 1),   # square, k=+1
-    (3, -1, -1),  # square, k=-1
-    (3,  5,  0),  # wide
-    (5,  3,  0),  # tall
-    (4,  4,  2),  # k beyond diagonal
-])
-def test_eye(N, M, k, cpp):
-    if M < 0:
-        r = cpp.eye(N, M, k)
-        e = np.eye(N, k=k)
-    else:
-        r = cpp.eye(N, M, k)
-        e = np.eye(N, M, k)
-    assert_bit_aligned(r, e, f"eye({N},{M},{k})")
-
-def test_eye_default(cpp):
-    assert_bit_aligned(cpp.eye(4), np.eye(4), "eye(4)")
-
-
-# -- identity ----------------------------------------------------------------
-
-@pytest.mark.parametrize("n", [1, 3, 5])
-def test_identity(n, cpp):
-    assert_bit_aligned(cpp.identity(n), np.identity(n), f"identity({n})")
-
-
-# -- diag --------------------------------------------------------------------
-
-def test_diag_vec_to_mat(cpp):
-    """1-D → diagonal matrix, k=0"""
-    v = np.array([1.0, 2.0, 3.0])
-    assert_bit_aligned(cpp.diag(v), np.diag(v), "diag(vec,k=0)")
-
-@pytest.mark.parametrize("k", [-2, -1, 1, 2])
-def test_diag_vec_kdiag(k, cpp):
-    v = np.array([1.0, 2.0, 3.0])
-    assert_bit_aligned(cpp.diag(v, k), np.diag(v, k), f"diag(vec,k={k})")
-
-def test_diag_mat_to_vec(cpp):
-    """2-D → extract main diagonal"""
-    m = np.array([[1.0, 2.0, 3.0],
-                  [4.0, 5.0, 6.0],
-                  [7.0, 8.0, 9.0]])
-    assert_bit_aligned(cpp.diag(m), np.diag(m), "diag(mat,k=0)")
-
-@pytest.mark.parametrize("k", [-2, -1, 1, 2])
-def test_diag_mat_kdiag(k, cpp):
-    m = np.arange(16.0).reshape(4, 4)
-    assert_bit_aligned(cpp.diag(m, k), np.diag(m, k), f"diag(mat,k={k})")
-
-
-# ============================================================================
-# 8. Astype conversions
-# ============================================================================
-
-def test_astype_int(cpp):
-    a = np.array([[1.7, 2.3], [-3.9, 0.5]], dtype=np.float64)
-    assert_bit_aligned(cpp.astype(a, "int"), a.astype(np.int32), "astype_int")
-
-def test_astype_bool(cpp):
-    a = np.array([[0.0, 1.0, -1.0], [3.14, 0.0, 0.0]], dtype=np.float64)
-    assert_bit_aligned(cpp.astype(a, "bool"), a.astype(bool), "astype_bool")
-
-def test_astype_bool_from_int(cpp):
-    a = np.array([[0, 1, -1], [42, 0, 0]], dtype=np.int32)
-    assert_bit_aligned(cpp.astype(a, "bool"), a.astype(bool), "astype_bool_from_int")
-
-def test_astype_f64_to_f32(cpp):
-    a = np.array([1.5, 2.7, -3.1], dtype=np.float64)
-    assert_bit_aligned(cpp.astype(a, "float32"), a.astype(np.float32), "astype_f64_to_f32")
-
-def test_astype_f32_to_f64(cpp):
-    a = np.array([1.5, 2.7, -3.1], dtype=np.float32)
-    assert_bit_aligned(cpp.astype(a, "float64"), a.astype(np.float64), "astype_f32_to_f64")
-
-def test_astype_f64_to_int64(cpp):
-    a = np.array([1.5, 2.7, -3.1], dtype=np.float64)
-    assert_bit_aligned(cpp.astype(a, "int64"), a.astype(np.int64), "astype_f64_to_int64")
-
-def test_astype_int_to_f64(cpp):
-    a = np.array([1, 2, -3], dtype=np.int32)
-    assert_bit_aligned(cpp.astype(a, "float64"), a.astype(np.float64), "astype_int_to_f64")
-
-def test_astype_int_to_f32(cpp):
-    a = np.array([1, 2, -3], dtype=np.int32)
-    assert_bit_aligned(cpp.astype(a, "float32"), a.astype(np.float32), "astype_int_to_f32")
-
-def test_astype_bool_to_f64(cpp):
-    a = np.array([True, False, True], dtype=bool)
-    assert_bit_aligned(cpp.astype(a, "float64"), a.astype(np.float64), "astype_bool_to_f64")
-
-def test_astype_bool_to_int(cpp):
-    a = np.array([True, False, True, False], dtype=bool)
-    assert_bit_aligned(cpp.astype(a, "int"), a.astype(np.int32), "astype_bool_to_int")
-
-def test_truncate_to_float32(cpp):
-    a = np.array([1.0 / 3.0, np.pi, np.sqrt(2.0)], dtype=np.float64)
-    py_r = a.astype(np.float32).astype(np.float64)
-    assert_bit_aligned(cpp.truncate_to_float32(a), py_r, "truncate_to_float32")
-
-
-# ============================================================================
-# 9. Logical & special values
-# ============================================================================
-
-def test_logical_and(cpp):
-    a = np.array([True, True, False, False])
-    b = np.array([True, False, True, False])
-    assert_bit_aligned(cpp.logical_and(a, b), np.logical_and(a, b), "logical_and")
-
-def test_logical_or(cpp):
-    a = np.array([True, True, False, False])
-    b = np.array([True, False, True, False])
-    assert_bit_aligned(cpp.logical_or(a, b), np.logical_or(a, b), "logical_or")
-
-def test_logical_not(cpp):
-    a = np.array([True, False, True])
-    assert_bit_aligned(cpp.logical_not(a), np.logical_not(a), "logical_not")
-
-def test_logical_xor(cpp):
-    a = np.array([True, True, False, False])
-    b = np.array([True, False, True, False])
-    assert_bit_aligned(cpp.logical_xor(a, b), np.logical_xor(a, b), "logical_xor")
-
-def test_any_true(cpp):
-    assert cpp.any(np.array([False, False, True, False])) == True, "any true"
-
-def test_any_false(cpp):
-    assert cpp.any(np.array([False, False, False])) == False, "any false"
-
-def test_all_true(cpp):
-    assert cpp.all(np.array([True, True, True])) == True, "all true"
-
-def test_all_false(cpp):
-    assert cpp.all(np.array([True, False, True])) == False, "all false"
-
-def test_isnan(cpp, dtype):
-    a = np.array([0.0, np.nan, 1.0, np.nan], dtype=dtype)
-    assert_bit_aligned(cpp.isnan(a), np.isnan(a), "isnan")
-
-def test_isinf(cpp, dtype):
-    a = np.array([0.0, np.inf, -np.inf, 1.0], dtype=dtype)
-    assert_bit_aligned(cpp.isinf(a), np.isinf(a), "isinf")
-
-def test_isfinite(cpp, dtype):
-    a = np.array([0.0, np.inf, np.nan, 1.0, -np.inf], dtype=dtype)
-    assert_bit_aligned(cpp.isfinite(a), np.isfinite(a), "isfinite")
-
-
-# ============================================================================
-# 10. Array manipulation
-# ============================================================================
-
-def test_diff_1d(cpp, dtype):
-    a = np.array([1.0, 3.0, 6.0, 10.0], dtype=dtype)
-    assert_bit_aligned(cpp.diff(a), np.diff(a), "diff 1d")
-
-def test_diff_2d_axis0(cpp, dtype):
-    a = random_array((5, 4), dtype=dtype)
-    assert_bit_aligned(cpp.diff(a, 1, 0), np.diff(a, n=1, axis=0), "diff axis=0")
-
-def test_diff_2d_axis1(cpp, dtype):
-    a = random_array((5, 4), dtype=dtype)
-    assert_bit_aligned(cpp.diff(a, 1, 1), np.diff(a, n=1, axis=1), "diff axis=1")
-
-def test_diff_2d_axis_neg1(cpp, dtype):
-    a = random_array((5, 4), dtype=dtype)
-    assert_bit_aligned(cpp.diff(a, 1, -1), np.diff(a, n=1, axis=-1), "diff axis=-1")
-
-def test_stack(cpp, dtype):
-    arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(4)]
-    assert_bit_aligned(cpp.stack(arrays), np.stack(arrays), "stack")
-
-def test_concatenate_1d(cpp, dtype):
-    arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concatenate 1d")
-
-def test_concatenate_2d_axis0(cpp, dtype):
-    arrays = [random_array((2, 3), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concatenate 2d axis=0")
-    # Verify default axis=0
-    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concatenate 2d default axis")
-
-def test_concatenate_2d_axis1(cpp, dtype):
-    arrays = [random_array((3, 2), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.concatenate(arrays, 1), np.concatenate(arrays, axis=1), "concatenate 2d axis=1")
-
-def test_concatenate_2d_axis_neg1(cpp, dtype):
-    arrays = [random_array((3, 2), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.concatenate(arrays, -1), np.concatenate(arrays, axis=-1), "concatenate 2d axis=-1")
-
-def test_concatenate_3d_axis0(cpp, dtype):
-    arrays = [random_array((2, 3, 4), seed=i, dtype=dtype) for i in range(2)]
-    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concatenate 3d axis=0")
-
-def test_concatenate_3d_axis1(cpp, dtype):
-    arrays = [random_array((3, 2, 4), seed=i, dtype=dtype) for i in range(2)]
-    assert_bit_aligned(cpp.concatenate(arrays, 1), np.concatenate(arrays, axis=1), "concatenate 3d axis=1")
-
-def test_concatenate_3d_axis2(cpp, dtype):
-    arrays = [random_array((3, 4, 2), seed=i, dtype=dtype) for i in range(2)]
-    assert_bit_aligned(cpp.concatenate(arrays, 2), np.concatenate(arrays, axis=2), "concatenate 3d axis=2")
-
-def test_concatenate_two_arrays(cpp, dtype):
-    arrays = [random_array((5,), seed=0, dtype=dtype), random_array((7,), seed=1, dtype=dtype)]
-    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concatenate two")
-
-def test_concatenate_single(cpp, dtype):
-    arrays = [random_array((5,), dtype=dtype)]
-    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concatenate single")
-
-def test_vstack(cpp, dtype):
-    arrays = [random_array((1, 3), seed=i, dtype=dtype) for i in range(4)]
-    assert_bit_aligned(cpp.vstack(arrays), np.vstack(arrays), "vstack")
-
-def test_vstack_1d(cpp, dtype):
-    arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(4)]
-    assert_bit_aligned(cpp.vstack(arrays), np.vstack(arrays), "vstack 1d")
-
-def test_hstack(cpp, dtype):
-    arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.hstack(arrays), np.hstack(arrays), "hstack 1d")
-
-def test_hstack_2d(cpp, dtype):
-    arrays = [random_array((3, 2), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.hstack(arrays), np.hstack(arrays), "hstack 2d")
-
-# -- Concatenate complex / edge-case tests ----------------------------------
-
-def test_concatenate_4d_axis0(cpp, dtype):
-    arrays = [random_array((2, 3, 4, 5), seed=i, dtype=dtype) for i in range(2)]
-    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concatenate 4d axis=0")
-
-def test_concatenate_4d_axis2(cpp, dtype):
-    arrays = [random_array((2, 3, 2, 5), seed=i, dtype=dtype) for i in range(2)]
-    assert_bit_aligned(cpp.concatenate(arrays, 2), np.concatenate(arrays, axis=2), "concatenate 4d axis=2")
-
-def test_concatenate_4d_axis_neg2(cpp, dtype):
-    arrays = [random_array((2, 3, 2, 5), seed=i, dtype=dtype) for i in range(2)]
-    assert_bit_aligned(cpp.concatenate(arrays, -2), np.concatenate(arrays, axis=-2), "concatenate 4d axis=-2")
-
-def test_concatenate_unequal_axis_sizes(cpp, dtype):
-    """Concatenate arrays of different sizes along the concatenation axis."""
-    a = random_array((3, 2), seed=1, dtype=dtype)
-    b = random_array((3, 4), seed=2, dtype=dtype)
-    c = random_array((3, 1), seed=3, dtype=dtype)
-    assert_bit_aligned(cpp.concatenate([a, b, c], 1),
-                       np.concatenate([a, b, c], axis=1), "concat unequal axis sizes")
-
-def test_concatenate_many_arrays(cpp, dtype):
-    """Concatenate 10 arrays along axis=0."""
-    arrays = [random_array((3,), seed=i, dtype=dtype) for i in range(10)]
-    assert_bit_aligned(cpp.concatenate(arrays), np.concatenate(arrays), "concat 10 arrays")
-
-def test_concatenate_large_3d(cpp, dtype):
-    """Large 3D concatenation along middle axis."""
-    arrays = [random_array((50, 20, 30), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.concatenate(arrays, 1), np.concatenate(arrays, axis=1), "concat large 3d axis=1")
-
-def test_concatenate_large_2d_axis0(cpp, dtype):
-    """Large 2D concatenation — 500 rows each, 4 arrays."""
-    arrays = [random_array((500, 10), seed=i, dtype=dtype) for i in range(4)]
-    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concat large 2d axis=0")
-
-def test_concatenate_large_2d_axis1(cpp, dtype):
-    """Large 2D concatenation — 500 cols each, 3 arrays."""
-    arrays = [random_array((10, 500), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.concatenate(arrays, 1), np.concatenate(arrays, axis=1), "concat large 2d axis=1")
-
-def test_concatenate_identity(cpp, dtype):
-    """Concatenating a single array returns identical copy."""
-    a = random_array((3, 4), seed=42, dtype=dtype)
-    assert_bit_aligned(cpp.concatenate([a], 0), np.concatenate([a], axis=0), "concat identity")
-    assert_bit_aligned(cpp.concatenate([a], 1), np.concatenate([a], axis=1), "concat identity axis=1")
-
-def test_concatenate_zeros(cpp, dtype):
-    """Concatenate arrays of zeros."""
-    a = np.zeros((2, 3), dtype=dtype)
-    b = np.zeros((2, 5), dtype=dtype)
-    assert_bit_aligned(cpp.concatenate([a, b], 1), np.concatenate([a, b], axis=1), "concat zeros")
-
-def test_concatenate_ones(cpp, dtype):
-    """Concatenate arrays of ones."""
-    a = np.ones((3, 2), dtype=dtype)
-    b = np.ones((5, 2), dtype=dtype)
-    assert_bit_aligned(cpp.concatenate([a, b], 0), np.concatenate([a, b], axis=0), "concat ones")
-
-def test_concatenate_3d_axis_neg2(cpp, dtype):
-    """3D concatenate along axis=-2 (middle axis)."""
-    arrays = [random_array((2, 3, 4), seed=i, dtype=dtype) for i in range(3)]
-    assert_bit_aligned(cpp.concatenate(arrays, -2), np.concatenate(arrays, axis=-2), "concat 3d axis=-2")
-
-def test_concatenate_3d_axis_neg3(cpp, dtype):
-    """3D concatenate along axis=-3 (first axis)."""
-    arrays = [random_array((2, 3, 4), seed=i, dtype=dtype) for i in range(2)]
-    assert_bit_aligned(cpp.concatenate(arrays, -3), np.concatenate(arrays, axis=-3), "concat 3d axis=-3")
-
-def test_concatenate_5d(cpp, dtype):
-    """5D concatenate along various axes."""
-    arrays = [random_array((2, 3, 2, 3, 2), seed=i, dtype=dtype) for i in range(2)]
-    assert_bit_aligned(cpp.concatenate(arrays, 0), np.concatenate(arrays, axis=0), "concat 5d axis=0")
-    assert_bit_aligned(cpp.concatenate(arrays, 2), np.concatenate(arrays, axis=2), "concat 5d axis=2")
-    assert_bit_aligned(cpp.concatenate(arrays, -1), np.concatenate(arrays, axis=-1), "concat 5d axis=-1")
-
-def test_where_scalar(cpp, dtype):
-    cond = np.array([True, False, True, False, True])
-    assert_bit_aligned(cpp.where(cond, dtype(10.0), dtype(-1.0)),
-                       np.where(cond, dtype(10.0), dtype(-1.0)), "where scalar")
-
-def test_where_array(cpp, dtype):
-    cond = np.array([True, False, True, False])
-    x = np.array([1.0, 2.0, 3.0, 4.0], dtype=dtype)
-    y = np.array([-1.0, -2.0, -3.0, -4.0], dtype=dtype)
-    assert_bit_aligned(cpp.where(cond, x, y), np.where(cond, x, y), "where array")
-
-def test_transpose_1d(cpp, dtype):
-    a = random_array((5,), dtype=dtype)
-    assert_bit_aligned(cpp.transpose(a), np.transpose(a), "transpose 1d")
-
-def test_transpose_2d(cpp, dtype):
-    a = random_array((3, 5), dtype=dtype)
-    assert_bit_aligned(cpp.transpose(a), np.transpose(a), "transpose 2d")
-
-def test_flatten(cpp, dtype):
-    a = random_array((3, 4), dtype=dtype)
-    assert_bit_aligned(cpp.flatten(a), a.flatten(), "flatten")
-
-
-# Mean axis
-def test_mean_axis0_2d(cpp, dtype):
-    a = random_array((4, 5), dtype=dtype)
-    assert_bit_aligned(cpp.mean(a, 0), np.mean(a, axis=0), "mean axis=0")
-
-def test_mean_axis1_2d(cpp, dtype):
-    a = random_array((4, 5), dtype=dtype)
-    assert_bit_aligned(cpp.mean(a, 1), np.mean(a, axis=1), "mean axis=1")
-
-def test_mean_axis_neg1_2d(cpp, dtype):
-    a = random_array((4, 5), dtype=dtype)
-    assert_bit_aligned(cpp.mean(a, -1), np.mean(a, axis=-1), "mean axis=-1")
-
-def test_mean_axis0_3d(cpp, dtype):
-    a = random_array((3, 4, 5), dtype=dtype)
-    assert_bit_aligned(cpp.mean(a, 0), np.mean(a, axis=0), "mean 3d axis=0")
-
-def test_mean_axis1_3d(cpp, dtype):
-    a = random_array((3, 4, 5), dtype=dtype)
-    assert_bit_aligned(cpp.mean(a, 1), np.mean(a, axis=1), "mean 3d axis=1")
-
-def test_mean_axis2_3d(cpp, dtype):
-    a = random_array((3, 4, 5), dtype=dtype)
-    assert_bit_aligned(cpp.mean(a, 2), np.mean(a, axis=2), "mean 3d axis=2")
-
-# ── issue #001: mean_axis pairwise_sum vs sequential (float32 ULP) ──────────
-#
-# Reported scenario: (4, 2) float32 polygon → mean(axis=0) → (2,) center.
-# Root cause (original analysis): pairwise_sum used instead of sequential sum
-# for small axis sizes.  The fix is confirmed present: pairwise_sum already
-# falls back to sequential accumulation for n < 8.  These tests lock in
-# bit-exact behaviour for the exact shapes and n ≥ 8 boundary cases that were
-# previously uncovered.
-
-def test_mean_axis_polygon_center_f32(cpp):
-    """issue #001 — (4,2) float32 polygon center via mean(axis=0) → (2,)."""
-    poly = np.array([
-        [10.5,  20.3],
-        [30.7,  40.1],
-        [50.9,  60.2],
-        [70.4,  80.8],
-    ], dtype=np.float32)
-    assert_bit_aligned(cpp.mean(poly, 0), np.mean(poly, axis=0),
-                       "polygon center axis=0")
-    assert_bit_aligned(cpp.mean(poly, 1), np.mean(poly, axis=1),
-                       "polygon row-mean axis=1")
-
-def test_mean_axis_polygon_center_rounding_f32(cpp):
-    """issue #001 — float32 values near rounding boundary, axis=0."""
-    # 2^23 = 8388608 exactly representable; +1 triggers ULP rounding in f32
-    v = np.float32(2**23)
-    poly = np.array([
-        [v,    1.0],
-        [v,    1.0],
-        [v,    1.0],
-        [1.0,  v  ],
-    ], dtype=np.float32)
-    assert_bit_aligned(cpp.mean(poly, 0), np.mean(poly, axis=0),
-                       "polygon rounding axis=0")
-
-@pytest.mark.parametrize("n_axis", [8, 9, 16, 17, 100, 128, 129])
-def test_mean_axis_large_fiber(cpp, dtype, n_axis):
-    """issue #001 — mean_axis for axis sizes ≥ 8 (pairwise_sum medium / recursive path)."""
-    a = random_array((3, n_axis), dtype=dtype, seed=1001 + n_axis)
-    assert_bit_aligned(cpp.mean(a, 1), np.mean(a, axis=1),
-                       f"mean (3,{n_axis}) axis=1")
-    b = random_array((n_axis, 3), dtype=dtype, seed=1001 + n_axis)
-    assert_bit_aligned(cpp.mean(b, 0), np.mean(b, axis=0),
-                       f"mean ({n_axis},3) axis=0")
-
-def test_mean_axis_n8_boundary_f32(cpp):
-    """issue #001 — n=8 boundary with pairwise (stride=1) and sequential (stride>1) paths.
-
-    numpy's accumulation order depends on the axis memory stride:
-      stride == 1  (last/contiguous axis)  → pairwise
-      stride >  1  (non-contiguous axis)   → sequential
-    """
-    v = np.float32(2**24)  # 16777216; ULP = 2, so adding 1 is lost
-
-    # ── stride=1 (axis=1, last dim, contiguous) → numpy uses pairwise ─────
-    # shape (1, 8): single row, reduce over contiguous last axis
-    a_contig = np.array([[v] + [np.float32(1.0)] * 7], dtype=np.float32)
-    assert_bit_aligned(cpp.mean(a_contig, 1), np.mean(a_contig, axis=1),
-                       "n=8 stride=1 (pairwise)")
-
-    # shape (3, 8): three rows, reduce over contiguous last axis
-    a_3x8 = np.tile(np.array([v] + [np.float32(1.0)] * 7, dtype=np.float32), (3, 1))
-    assert_bit_aligned(cpp.mean(a_3x8, 1), np.mean(a_3x8, axis=1),
-                       "n=8 stride=1 3-row (pairwise)")
-
-    # ── stride>1 (axis=0, non-contiguous) → numpy uses sequential ──────────
-    # shape (8, 1): 8 rows, reduce over non-contiguous axis=0 (stride=1 but…)
-    # Actually (8,1) axis=0 has stride=1 as well → pairwise
-    a_8x3 = np.column_stack([np.array([v] + [np.float32(1.0)] * 7, dtype=np.float32),
-                              np.ones((8, 2), dtype=np.float32)])
-    assert_bit_aligned(cpp.mean(a_8x3, 0), np.mean(a_8x3, axis=0),
-                       "n=8 stride=3 (sequential)")
-
-
-# Slice & assign
-def test_slice_basic(cpp, dtype):
-    a = random_array((10, 3), dtype=dtype)
-    assert_bit_aligned(cpp.slice(a, 2, 7), a[2:7], "slice 2:7")
-
-def test_slice_from_start(cpp, dtype):
-    a = random_array((10, 3), dtype=dtype)
-    assert_bit_aligned(cpp.slice(a, 0, 5), a[0:5], "slice :5")
-
-def test_take_cols(cpp, dtype):
-    a = random_array((4, 6), dtype=dtype)
-    assert_bit_aligned(cpp.take_cols(a, 3), a[:, :3], "take_cols 3")
-
-def test_slice_assign_float(cpp, dtype):
-    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
-    expected = a.copy()
-    cpp.slice_assign(a, 2, dtype(99.0))
-    expected[2:] = dtype(99.0)
-    assert_bit_aligned(a, expected, "slice_assign float")
-
-def test_slice_assign_int(cpp):
-    a = np.array([1, 2, 3, 4, 5], dtype=np.int32)
-    expected = a.copy()
-    cpp.slice_assign(a, 3, -1)
-    expected[3:] = -1
-    assert_bit_aligned(a, expected, "slice_assign int")
-
-def test_slice_assign_bool(cpp):
-    a = np.array([True, False, True, False], dtype=bool)
-    expected = a.copy()
-    cpp.slice_assign(a, 2, False)
-    expected[2:] = False
-    assert_bit_aligned(a, expected, "slice_assign bool")
-
-
-# Roll, flip, repeat, tile
-def test_roll_positive(cpp, dtype):
-    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
-    assert_bit_aligned(cpp.roll(a, 2), np.roll(a, 2), "roll +2")
-
-def test_roll_negative(cpp, dtype):
-    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
-    assert_bit_aligned(cpp.roll(a, -1), np.roll(a, -1), "roll -1")
-
-def test_flip(cpp, dtype):
-    a = np.array([1.0, 2.0, 3.0, 4.0], dtype=dtype)
-    assert_bit_aligned(cpp.flip(a), np.flip(a), "flip")
-
-def test_repeat(cpp, dtype):
-    a = np.array([1.0, 2.0, 3.0], dtype=dtype)
-    assert_bit_aligned(cpp.repeat(a, 3), np.repeat(a, 3), "repeat")
-
-def test_tile(cpp, dtype):
-    a = np.array([1.0, 2.0, 3.0], dtype=dtype)
-    assert_bit_aligned(cpp.tile(a, 2), np.tile(a, 2), "tile")
-
-
-# ============================================================================
-# 11. Sorting & indexing
-# ============================================================================
-
-def test_argsort(cpp, dtype):
-    a = np.array([3.0, 1.0, 4.0, 1.0, 5.0], dtype=dtype)
-    assert_bit_aligned(cpp.argsort(a), np.argsort(a, kind='stable'), "argsort")
-
-def test_argmax(cpp, dtype):
-    a = np.array([1.0, 5.0, 3.0, 9.0, 2.0], dtype=dtype)
-    assert cpp.argmax(a) == np.argmax(a), "argmax"
-
-def test_argmin(cpp, dtype):
-    a = np.array([5.0, 1.0, 3.0, 0.5, 2.0], dtype=dtype)
-    assert cpp.argmin(a) == np.argmin(a), "argmin"
-
-
-# ============================================================================
-# 12. Set operations & interpolation
-# ============================================================================
-
-def test_isin(cpp):
-    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-    assert_bit_aligned(cpp.isin(a, [2.0, 4.0, 6.0]), np.isin(a, [2.0, 4.0, 6.0]), "isin")
-
-def test_isin_int(cpp):
-    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-    assert_bit_aligned(cpp.isin(a, [2, 4, 6]), np.isin(a, [2, 4, 6]), "isin_int")
-
-def test_flatnonzero(cpp):
-    a = np.array([0.0, 1.0, 0.0, 2.0, 0.0, 3.0])
-    assert_bit_aligned(cpp.flatnonzero(a), np.flatnonzero(a), "flatnonzero")
-    # all zeros
-    a2 = np.array([0.0, 0.0, 0.0])
-    assert_bit_aligned(cpp.flatnonzero(a2), np.flatnonzero(a2), "flatnonzero zeros")
-
-def test_hypot(cpp):
-    for dt in [np.float64, np.float32]:
-        x = np.array([3.0, 1.0, 5.0, 0.0, 1e10], dtype=dt)
-        y = np.array([4.0, 1.0, 12.0, 5.0, 1e10], dtype=dt)
-        assert_bit_aligned(cpp.hypot(x, y), np.hypot(x, y), f"hypot_{dt}")
-
-def test_unwrap(cpp):
-    for dt in [np.float64, np.float32]:
-        a = np.array([0.0, 0.5, 0.8, -0.9, -0.5, 0.2], dtype=dt)
-        assert_bit_aligned(cpp.unwrap(a), np.unwrap(a), f"unwrap_{dt}")
-    # Large values — bit-exact for both float64 and float32
-    for dt in [np.float64, np.float32]:
-        a2 = np.array([0.0, 2.5, 5.0, -2.5, -5.0], dtype=dt) * np.pi
-        assert_bit_aligned(cpp.unwrap(a2), np.unwrap(a2), f"unwrap_large_{dt.__name__}")
-
-def test_cumsum(cpp):
-    for dt in [np.float64, np.float32]:
-        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dt)
-        assert_bit_aligned(cpp.cumsum(a), np.cumsum(a), f"cumsum_{dt}")
-        a2 = np.array([0.1, 0.2, 0.3, 0.4, 0.5], dtype=dt)
-        assert_bit_aligned(cpp.cumsum(a2), np.cumsum(a2), f"cumsum_frac_{dt}")
-        a3 = np.array([-1.0, 2.0, -3.0, 4.0], dtype=dt)
-        assert_bit_aligned(cpp.cumsum(a3), np.cumsum(a3), f"cumsum_neg_{dt}")
-
-def test_squeeze(cpp):
-    for dt in [np.float64, np.float32]:
-        a = np.array([1.0, 2.0, 3.0], dtype=dt).reshape(3, 1)
-        assert_bit_aligned(cpp.squeeze(a), np.squeeze(a), f"squeeze_col_{dt}")
-        a2 = np.array([1.0, 2.0, 3.0], dtype=dt).reshape(1, 3)
-        assert_bit_aligned(cpp.squeeze(a2), np.squeeze(a2), f"squeeze_row_{dt}")
-        a3 = np.array([1.0, 2.0, 3.0, 4.0], dtype=dt).reshape(1, 2, 1, 2, 1)
-        assert_bit_aligned(cpp.squeeze(a3), np.squeeze(a3), f"squeeze_multi_{dt}")
-
-def test_intersect1d(cpp):
-    for dt in [np.float64, np.float32]:
-        a = np.array([1.0, 2.0, 3.0, 4.0], dtype=dt)
-        b = np.array([3.0, 4.0, 5.0, 6.0], dtype=dt)
-        cpp_r = np.sort(np.asarray(cpp.intersect1d(a, b)))
-        assert_bit_aligned(cpp_r, np.intersect1d(a, b), f"intersect1d_{dt}")
-
-def test_interp_basic(cpp):
-    xp = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
-    fp = np.array([0.0, 2.0, 4.0, 6.0, 8.0])
-    x = np.array([0.5, 1.5, 2.5, 3.5])
-    assert_bit_aligned(cpp.interp(x, xp, fp), np.interp(x, xp, fp), "interp")
-
-def test_interp_extrap_low(cpp):
-    xp, fp = np.array([1.0, 2.0, 3.0]), np.array([10.0, 20.0, 30.0])
-    assert_bit_aligned(cpp.interp(np.array([0.0, 0.5]), xp, fp),
-                       np.interp(np.array([0.0, 0.5]), xp, fp), "interp low")
-
-def test_interp_extrap_high(cpp):
-    xp, fp = np.array([1.0, 2.0, 3.0]), np.array([10.0, 20.0, 30.0])
-    assert_bit_aligned(cpp.interp(np.array([3.5, 5.0]), xp, fp),
-                       np.interp(np.array([3.5, 5.0]), xp, fp), "interp high")
-
-def test_safe_divide_normal(cpp):
-    assert np.float64(cpp.safe_divide(10.0, 2.0)) == np.float64(5.0), "safe_divide normal"
-
-def test_safe_divide_zero_denom(cpp):
-    assert np.float64(cpp.safe_divide(10.0, 0.0, -1.0)) == np.float64(-1.0), "safe_divide zero"
-
-def test_safe_divide_custom(cpp):
-    assert np.float64(cpp.safe_divide(10.0, 0.0, 99.0)) == np.float64(99.0), "safe_divide custom"
-
-
-# ============================================================================
-# 13. Array access & conversion
-# ============================================================================
-
-def test_array_get_1d(cpp):
-    a = np.array([10.0, 20.0, 30.0])
-    assert cpp.array_get(a, 0) == 10.0
-    assert cpp.array_get(a, 2) == 30.0
-    assert cpp.array_get(a, -1) == 30.0
-
-def test_array_get_2d(cpp):
-    a = np.array([[1.0, 2.0], [3.0, 4.0]])
-    assert cpp.array_get(a, 0, 0) == 1.0
-    assert cpp.array_get(a, 1, 1) == 4.0
-
-def test_asarray_vector(cpp):
-    v = [1.0, 2.0, 3.0]
-    assert_bit_aligned(cpp.asarray(v), np.asarray(v), "asarray vec")
-
-def test_asarray_array(cpp):
-    a = np.array([1.0, 2.0, 3.0])
-    assert_bit_aligned(cpp.asarray(a), np.asarray(a), "asarray arr")
-
-def test_to_vector_double(cpp):
-    a = np.array([1.0, 2.0, 3.0])
-    assert list(cpp.to_vector(a)) == [1.0, 2.0, 3.0], "to_vector double"
-
-def test_to_vector_bool(cpp):
-    a = np.array([True, False, True])
-    assert list(cpp.to_vector(a)) == [True, False, True], "to_vector bool"
-
-
-# ============================================================================
-# 14. Linalg — norm, dot
-# ============================================================================
-
-def test_norm_1d(cpp, dtype):
-    a = random_array((100,), dtype=dtype)
-    # np.linalg.norm internally computes sqrt(a.dot(a)) via BLAS
-    assert_bit_aligned(dtype(cpp.linalg.norm(a)), dtype(np.linalg.norm(a)), "linalg.norm 1d")
-
-def test_norm_2d(cpp, dtype):
-    a = random_array((5, 4), dtype=dtype)
-    # Frobenius norm: same BLAS path as 1d
-    assert_bit_aligned(dtype(cpp.linalg.norm(a)), dtype(np.linalg.norm(a)), "linalg.norm 2d")
-
-def test_norm_zero(cpp, dtype):
-    a = np.zeros((100,), dtype=dtype)
-    assert_bit_aligned(dtype(cpp.linalg.norm(a)), dtype(0.0), "linalg.norm zero")
-
-def test_norm_axis_2d(cpp, dtype):
-    a = random_array((5, 4), dtype=dtype)
-    assert_bit_aligned(cpp.linalg.norm(a, axis=1), np.linalg.norm(a, axis=1), "norm axis=1")
-
-def test_norm_1d_fallback(cpp, dtype):
-    a = np.array([3.0, 4.0], dtype=dtype)
-    cpp_r = np.float64(np.asarray(cpp.linalg.norm(a)).item())
-    py_r = np.float64(np.linalg.norm(a))
-    assert cpp_r == py_r, f"norm 1d fallback: {cpp_r} vs {py_r}"
-
-# --- linalg.inv ---
-
-def test_inv_identity(cpp, dtype):
-    """inv(I) = I."""
-    a = np.eye(4, dtype=dtype)
-    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), f"inv(eye) {dtype.__name__}")
-
-def test_inv_diag(cpp, dtype):
-    """inv(diag) = diag(1/d)."""
-    a = np.diag(np.array([2.0, 3.0, 4.0], dtype=dtype))
-    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), f"inv(diag) {dtype.__name__}")
-
-def test_inv_2x2(cpp):
-    """inv([[1,2],[3,4]]) = [[-2,1],[1.5,-0.5]]."""
-    a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
-    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), "inv(2x2) f64")
-
-def test_inv_random(cpp, dtype):
-    """inv(A) bit-identical to numpy for random 4×4."""
-    a = random_array((4, 4), dtype=dtype)
-    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), f"inv(4x4) {dtype.__name__}")
-
-def test_inv_random_3x3(cpp, dtype):
-    """inv(A) bit-identical to numpy for random 3×3."""
-    a = random_array((3, 3), dtype=dtype)
-    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), f"inv(3x3) {dtype.__name__}")
-
-def test_inv_singular(cpp):
-    """inv(singular) — numpy raises LinAlgError."""
-    import pytest as _pytest
-    a = np.array([[1.0, 2.0], [2.0, 4.0]], dtype=np.float64)
-    with _pytest.raises(RuntimeError):
-        cpp.linalg.inv(a)
-
-def test_inv_random_8x8(cpp):
-    """inv(A) bit-identical to numpy for random 8×8 float64."""
-    a = random_array((8, 8), dtype=np.float64, seed=42)
-    assert_bit_aligned(cpp.linalg.inv(a), np.linalg.inv(a), "inv(8x8) f64")
-
-def test_dot(cpp, dtype):
-    a = random_array((5,), dtype=dtype)
-    b = random_array((5,), seed=99, dtype=dtype)
-    # np.dot routes through BLAS sdot/ddot
-    assert_bit_aligned(cpp.dot(a, b), np.dot(a, b), "dot")
-
-def test_dot_orthogonal(cpp, dtype):
-    a = np.array([1.0, 0.0], dtype=dtype)
-    b = np.array([0.0, 1.0], dtype=dtype)
-    assert_bit_aligned(cpp.dot(a, b), np.dot(a, b), "dot orthogonal")
-
-
-# ============================================================================
-# 15. Einsum — all supported patterns
-# ============================================================================
-
-class TestEinsumIjIjToI:
-    """Pattern: 'ij,ij->i' — row-wise dot product."""
-
-    def test_fixed(self, cpp, dtype):
-        a = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=dtype)
-        b = np.array([[0.5, 1.5], [2.5, 3.5], [4.5, 5.5]], dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,ij->i", a, b),
-                           np.einsum("ij,ij->i", a, b), "ij,ij->i fixed")
-
-    @pytest.mark.parametrize("m,n", [(1, 1), (3, 2), (10, 5), (100, 3)])
-    def test_random(self, cpp, dtype, m, n):
-        a = random_array((m, n), seed=1, dtype=dtype)
-        b = random_array((m, n), seed=2, dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,ij->i", a, b),
-                           np.einsum("ij,ij->i", a, b), f"ij,ij->i [{m},{n}]")
-
-
-class TestEinsumIjJkToIk:
-    """Pattern: 'ij,jk->ik' — matrix multiplication."""
-
-    def test_fixed(self, cpp, dtype):
-        a = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=dtype)
-        b = np.array([[0.5, 1.5], [2.5, 3.5], [4.5, 5.5]], dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,jk->ik", a, b),
-                           np.einsum("ij,jk->ik", a, b), "ij,jk->ik fixed")
-
-    @pytest.mark.parametrize("i,j,k", [(1, 3, 2), (3, 3, 3), (10, 5, 10)])
-    def test_random(self, cpp, dtype, i, j, k):
-        a = random_array((i, j), seed=1, dtype=dtype)
-        b = random_array((j, k), seed=2, dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,jk->ik", a, b),
-                           np.einsum("ij,jk->ik", a, b), f"ij,jk->ik [{i},{j},{k}]")
-
-    def test_vs_matmul(self, cpp, dtype):
-        a = random_array((4, 5), seed=1, dtype=dtype)
-        b = random_array((5, 3), seed=2, dtype=dtype)
-        # Compare vs np.einsum (same SSE forward mul+add path as our implementation).
-        # np.einsum and np.matmul use different BLAS paths and can differ at machine
-        # epsilon — the bit-exact contract is with np.einsum, not with matmul.
-        assert_bit_aligned(np.asarray(cpp.einsum("ij,jk->ik", a, b)),
-                           np.einsum("ij,jk->ik", a, b),
-                           "ij,jk->ik vs np.einsum")
-
-
-class TestEinsumBijBjkToBik:
-    """Pattern: 'bij,bjk->bik' — batch matrix multiplication."""
-
-    def test_fixed(self, cpp, dtype):
-        a = np.array([[[1., 2.], [3., 4.]], [[5., 6.], [7., 8.]]], dtype=dtype)
-        b = np.array([[[0.5, 1.5], [2.5, 3.5]], [[4.5, 5.5], [6.5, 7.5]]], dtype=dtype)
-        assert_bit_aligned(cpp.einsum("bij,bjk->bik", a, b),
-                           np.einsum("bij,bjk->bik", a, b), "bij,bjk->bik fixed")
-
-    @pytest.mark.parametrize("batch,i,j,k", [(1, 3, 2, 4), (3, 3, 3, 3), (5, 2, 5, 3)])
-    def test_random(self, cpp, dtype, batch, i, j, k):
-        a = random_array((batch, i, j), seed=1, dtype=dtype)
-        b = random_array((batch, j, k), seed=2, dtype=dtype)
-        assert_bit_aligned(cpp.einsum("bij,bjk->bik", a, b),
-                           np.einsum("bij,bjk->bik", a, b), f"bij,bjk->bik [{batch},{i},{j},{k}]")
-
-    def test_vs_batch_matmul(self, cpp, dtype):
-        a = random_array((4, 5, 6), seed=1, dtype=dtype)
-        b = random_array((4, 6, 3), seed=2, dtype=dtype)
-        # Compare vs np.einsum (same SSE forward mul+add path as our implementation).
-        # np.einsum and np.matmul use different BLAS paths and can differ at machine
-        # epsilon — the bit-exact contract is with np.einsum, not with batched matmul.
-        assert_bit_aligned(np.asarray(cpp.einsum("bij,bjk->bik", a, b)),
-                           np.einsum("bij,bjk->bik", a, b),
-                           "bij,bjk->bik vs np.einsum")
-
-
-class TestEinsumAijAijToAi:
-    """Pattern: 'aij,aij->ai' — batch row-wise dot product."""
-
-    @pytest.mark.parametrize("a_sz,i_sz,j_sz", [(1, 3, 2), (3, 5, 4), (5, 10, 3)])
-    def test_random(self, cpp, dtype, a_sz, i_sz, j_sz):
-        a = random_array((a_sz, i_sz, j_sz), seed=1, dtype=dtype)
-        b = random_array((a_sz, i_sz, j_sz), seed=2, dtype=dtype)
-        assert_bit_aligned(cpp.einsum("aij,aij->ai", a, b),
-                           np.einsum("aij,aij->ai", a, b), f"aij,aij->ai [{a_sz},{i_sz},{j_sz}]")
-
-
-class TestEinsumBroadcastMatmul:
-    """Pattern: 'ijk,mkl->mjl' — broadcast matmul with contraction."""
-
-    @pytest.mark.parametrize("i,j,k,m,l", [(2, 3, 2, 3, 2), (1, 3, 2, 2, 3), (3, 2, 3, 2, 2)])
-    def test_random(self, cpp, dtype, i, j, k, m, l):
-        a = random_array((i, j, k), seed=1, dtype=dtype)
-        b = random_array((m, k, l), seed=2, dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ijk,mkl->mjl", a, b),
-                           np.einsum("ijk,mkl->mjl", a, b), f"ijk,mkl->mjl [{i},{j},{k},{m},{l}]")
-
-
-class TestEinsumNijNmjToNmi:
-    """Pattern: 'nij,nmj->nmi' — batched matmul with double transpose."""
-
-    @pytest.mark.parametrize("n,i,j,m", [(1, 3, 3, 2), (3, 2, 4, 3), (5, 3, 2, 4)])
-    def test_random(self, cpp, dtype, n, i, j, m):
-        a = random_array((n, i, j), seed=1, dtype=dtype)
-        b = random_array((n, m, j), seed=2, dtype=dtype)
-        assert_bit_aligned(cpp.einsum("nij,nmj->nmi", a, b),
-                           np.einsum("nij,nmj->nmi", a, b), f"nij,nmj->nmi [{n},{i},{j},{m}]")
-
-
-class TestEinsumAijJkaToAik:
-    """Pattern: 'aij,jka->aik' — batch matmul with transpose."""
-
-    @pytest.mark.parametrize("a_sz,i,j,k", [(1, 3, 3, 2), (3, 2, 4, 3), (5, 3, 2, 4)])
-    def test_random(self, cpp, dtype, a_sz, i, j, k):
-        a = random_array((a_sz, i, j), seed=1, dtype=dtype)
-        b = random_array((j, k, a_sz), seed=2, dtype=dtype)
-        assert_bit_aligned(cpp.einsum("aij,jka->aik", a, b),
-                           np.einsum("aij,jka->aik", a, b), f"aij,jka->aik [{a_sz},{i},{j},{k}]")
-
-
-class TestEinsumImplicit:
-    """Implicit mode: output labels are those appearing exactly once."""
-
-    def test_ij_ij(self, cpp, dtype):
-        a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=dtype)
-        b = np.array([[0.5, 1.5], [2.5, 3.5]], dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,ij", a, b),
-                           np.einsum("ij,ij", a, b), "ij,ij implicit")
-
-    def test_ij_jk(self, cpp, dtype):
-        a = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=dtype)
-        b = np.array([[0.5, 1.5], [2.5, 3.5], [4.5, 5.5]], dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,jk", a, b),
-                           np.einsum("ij,jk", a, b), "ij,jk implicit")
-
-
-class TestEinsumEdgeCases:
-    def test_single_element(self, cpp, dtype):
-        a = np.array([[1.0]], dtype=dtype)
-        b = np.array([[2.0]], dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,ij->i", a, b),
-                           np.einsum("ij,ij->i", a, b), "single element")
-
-    def test_large_values(self, cpp, dtype):
-        a = np.array([[1e10, 2e10], [3e10, 4e10]], dtype=dtype)
-        b = np.array([[5e10, 6e10], [7e10, 8e10]], dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,ij->i", a, b),
-                           np.einsum("ij,ij->i", a, b), "large values")
-
-    def test_negative(self, cpp, dtype):
-        a = np.array([[-1.0, 2.0], [3.0, -4.0]], dtype=dtype)
-        b = np.array([[5.0, -6.0], [-7.0, 8.0]], dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,ij->i", a, b),
-                           np.einsum("ij,ij->i", a, b), "negative values")
-
-    def test_zeros(self, cpp, dtype):
-        a = np.zeros((3, 2), dtype=dtype)
-        b = np.ones((3, 2), dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,ij->i", a, b),
-                           np.einsum("ij,ij->i", a, b), "zeros input")
-
-
-class TestEinsumLargeGateMachine:
-    """Realistic gate_machine sizes: [N-1, dims] where N ~ 100."""
-
-    @pytest.mark.parametrize("n,dims", [(10, 2), (50, 3), (100, 2), (200, 3)])
-    def test_ij_ij_to_i(self, cpp, dtype, n, dims):
-        a = random_array((n, dims), seed=1, dtype=dtype)
-        b = random_array((n, dims), seed=2, dtype=dtype)
-        assert_bit_aligned(cpp.einsum("ij,ij->i", a, b),
-                           np.einsum("ij,ij->i", a, b), f"gate_machine [{n},{dims}]")
-
-
-# ============================================================================
-# 16. Special values — NaN / ±0 / ±Inf passthrough
-# ============================================================================
-#
-# All float functions must be bit-exact with numpy for IEEE 754 special inputs:
-#   • NaN input  → NaN output with identical bit pattern
-#   • ±0 input   → correct signed result (sin(-0)=-0, cos(0)=1, etc.)
-#   • ±Inf input → correct result (+inf, -inf, or NaN as numpy defines)
-#   • Domain errors (log(-1), sqrt(-1), arcsin(2)) → NaN bit-exact with numpy
-#
-# AVX-512 boundary sizes (1, 16, 17) stress the scalar-tail vs full-vector paths.
-# ============================================================================
-
-# Functions tested for NaN passthrough (all unary float functions)
-_UNARY_NAN_FNS = [
-    ("exp",     np.exp),
-    ("log",     np.log),
-    ("sin",     np.sin),
-    ("cos",     np.cos),
-    ("tan",     np.tan),
-    ("sqrt",    np.sqrt),
-    ("cbrt",    np.cbrt),
-    ("expm1",   np.expm1),
-    ("log1p",   np.log1p),
-    ("log10",   np.log10),
-    ("log2",    np.log2),
-    ("arcsin",  np.arcsin),
-    ("arccos",  np.arccos),
-    ("arctan",  np.arctan),
-    ("abs",     np.abs),
-    ("sign",    np.sign),
-    ("floor",   np.floor),
-    ("ceil",    np.ceil),
-    ("round",   np.round),
-    ("degrees", np.degrees),
-    ("radians", np.radians),
-]
-_NAN_FN_IDS = [fn for fn, _ in _UNARY_NAN_FNS]
-
-# AVX-512 boundary sizes: 1 = scalar-tail only; 16 = full f32 vector; 17 = vector+tail
-_NAN_SIZES_F32 = [1, 16, 17]
-# F64 vector width = 8: 1 = scalar tail; 8 = full f64 vector; 9 = vector+tail
-_NAN_SIZES_F64 = [1, 8, 9]
-
-
-@pytest.mark.parametrize(
-    "fn_name,np_fn,n",
-    [(fn, npf, sz) for fn, npf in _UNARY_NAN_FNS for sz in _NAN_SIZES_F32],
-    ids=[f"{fn}_n{sz}" for fn, _ in _UNARY_NAN_FNS for sz in _NAN_SIZES_F32])
-def test_nan_passthrough_f32(fn_name, np_fn, n, cpp):
-    """NaN input → NaN output, bit-exact with numpy, float32.
-
-    Covers scalar-tail (n=1), full AVX-512 vector (n=16), and vector+tail (n=17).
-    """
-    a = np.full(n, np.nan, dtype=np.float32)
-    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
-                       f"{fn_name}(nan) f32 n={n}")
-
-
-@pytest.mark.parametrize(
-    "fn_name,np_fn,n",
-    [(fn, npf, sz) for fn, npf in _UNARY_NAN_FNS for sz in _NAN_SIZES_F64],
-    ids=[f"{fn}_n{sz}" for fn, _ in _UNARY_NAN_FNS for sz in _NAN_SIZES_F64])
-def test_nan_passthrough_f64(fn_name, np_fn, n, cpp):
-    """NaN input → NaN output, bit-exact with numpy, float64."""
-    a = np.full(n, np.nan, dtype=np.float64)
-    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
-                       f"{fn_name}(nan) f64 n={n}")
-
-
-@pytest.mark.parametrize("fn_name,np_fn", _UNARY_NAN_FNS, ids=_NAN_FN_IDS)
-def test_nan_mixed_f32(fn_name, np_fn, cpp):
-    """Mixed NaN and finite values (17 elements): NaN must not corrupt neighbours.
-
-    17 elements forces AVX-512 16-wide + 1-element scalar tail path.
-    Finite values chosen to lie in the safe domain of all tested functions.
-    """
-    a = np.array([1.0, np.nan, 0.5, np.nan, 0.3, np.nan, 0.7, np.nan,
-                  0.1, np.nan, 0.9, np.nan, 0.2, np.nan, 0.8, np.nan,
-                  0.4], dtype=np.float32)
-    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
-                       f"{fn_name}(mixed nan) f32")
-
-
-@pytest.mark.parametrize("fn_name,np_fn", _UNARY_NAN_FNS, ids=_NAN_FN_IDS)
-def test_nan_mixed_f64(fn_name, np_fn, cpp):
-    """Mixed NaN and finite values (9 elements): AVX-512 8-wide + 1-element tail."""
-    a = np.array([1.0, np.nan, 0.5, np.nan, 0.3,
-                  np.nan, 0.7, np.nan, 0.4], dtype=np.float64)
-    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
-                       f"{fn_name}(mixed nan) f64")
-
-
-# --- Signed zero ---
-
-def test_sin_signed_zero(cpp):
-    """sin(−0.0) = −0.0, sin(+0.0) = +0.0 — signed zeros must propagate."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([-0.0, 0.0], dtype=dt)
-        assert_bit_aligned(cpp.sin(a), np.sin(a), f"sin(±0) {dt.__name__}")
-
-
-def test_cos_signed_zero(cpp):
-    """cos(±0.0) = 1.0 — both signs of zero give the same positive result."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([0.0, -0.0], dtype=dt)
-        assert_bit_aligned(cpp.cos(a), np.cos(a), f"cos(±0) {dt.__name__}")
-
-
-def test_log_neg_zero(cpp):
-    """log(−0.0) = −∞ (IEEE 754: log of ±0 is −∞, not NaN).
-
-    Classic bug: sign-bit check firing before zero check returns NaN instead.
-    """
-    for dt in [np.float32, np.float64]:
-        a = np.array([-0.0], dtype=dt)
-        result = np.asarray(cpp.log(a))
-        assert np.isinf(result[0]) and result[0] < 0, \
-               f"log(-0) should be -inf, got {result[0]} ({dt.__name__})"
-        assert_bit_aligned(result, np.log(a), f"log(-0) {dt.__name__}")
-
-
-def test_exp_signed_zero(cpp):
-    """exp(±0.0) = 1.0 for both zero signs."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([0.0, -0.0], dtype=dt)
-        assert_bit_aligned(cpp.exp(a), np.exp(a), f"exp(±0) {dt.__name__}")
-
-
-# --- Infinity inputs ---
-
-def test_exp_inf(cpp):
-    """exp(+∞) = +∞, exp(−∞) = 0.0 — both must be bit-exact."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.inf, -np.inf], dtype=dt)
-        assert_bit_aligned(cpp.exp(a), np.exp(a), f"exp(±inf) {dt.__name__}")
-
-
-def test_log_pos_inf(cpp):
-    """log(+∞) = +∞."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.inf], dtype=dt)
-        assert_bit_aligned(cpp.log(a), np.log(a), f"log(+inf) {dt.__name__}")
-
-
-def test_sqrt_pos_inf(cpp):
-    """sqrt(+∞) = +∞."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.inf], dtype=dt)
-        assert_bit_aligned(cpp.sqrt(a), np.sqrt(a), f"sqrt(+inf) {dt.__name__}")
-
-
-def test_sin_inf(cpp):
-    """sin(±∞) = NaN (invalid-operation domain error)."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.inf, -np.inf], dtype=dt)
-        assert_bit_aligned(cpp.sin(a), np.sin(a), f"sin(±inf) {dt.__name__}")
-
-
-def test_cos_inf(cpp):
-    """cos(±∞) = NaN (invalid-operation domain error)."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.inf, -np.inf], dtype=dt)
-        assert_bit_aligned(cpp.cos(a), np.cos(a), f"cos(±inf) {dt.__name__}")
-
-
-# --- Domain errors → NaN ---
-
-def test_domain_sqrt_neg(cpp):
-    """sqrt(negative) = NaN — bit-exact with numpy."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([-1.0, -4.0, -0.5], dtype=dt)
-        assert_bit_aligned(cpp.sqrt(a), np.sqrt(a), f"sqrt(neg) {dt.__name__}")
-
-
-def test_domain_log_neg(cpp):
-    """log(negative) = NaN — both C++ and numpy must produce NaN.
-
-    The exact NaN bit-pattern (sign bit) varies across numpy versions and CPU
-    paths (SVML vs scalar) — numpy ≥1.26 normalises to positive qNaN on the
-    scalar path but not the SVML path.  We therefore check only that the output
-    is NaN where numpy is NaN, not the exact bit pattern.
-    """
-    for dt in [np.float32, np.float64]:
-        a = np.array([-1.0, -2.5, -0.5], dtype=dt)
-        cpp_r = np.asarray(cpp.log(a))
-        np_r  = np.log(a)
-        assert np.all(np.isnan(cpp_r) == np.isnan(np_r)), \
-               f"log(neg) {dt.__name__}: NaN mask mismatch: C++={cpp_r} numpy={np_r}"
-    # 16 negative floats — exercises AVX-512 wide loop when available
-    a16 = np.full(16, -1.0, dtype=np.float32)
-    cpp_r16 = np.asarray(cpp.log(a16))
-    assert np.all(np.isnan(cpp_r16)), \
-           f"log(neg) f32 n=16: expected all NaN, got {cpp_r16}"
-
-
-def test_domain_arcsin_oob(cpp):
-    """arcsin/arccos(|x|>1) = NaN — bit-exact with numpy."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([2.0, -2.0, 1.5], dtype=dt)
-        assert_bit_aligned(cpp.arcsin(a), np.arcsin(a), f"arcsin(oob) {dt.__name__}")
-        assert_bit_aligned(cpp.arccos(a), np.arccos(a), f"arccos(oob) {dt.__name__}")
-
-
-# --- sign special values ---
-
-def test_sign_nan_special(cpp):
-    """sign(NaN) = NaN — must not silently return 0."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.nan, np.nan], dtype=dt)
-        assert_bit_aligned(cpp.sign(a), np.sign(a), f"sign(nan) {dt.__name__}")
-
-
-def test_sign_inf_special(cpp):
-    """sign(+∞) = +1.0, sign(−∞) = −1.0."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.inf, -np.inf], dtype=dt)
-        assert_bit_aligned(cpp.sign(a), np.sign(a), f"sign(±inf) {dt.__name__}")
-
-
-def test_sign_zero_signs(cpp):
-    """sign(+0) = sign(−0) = 0.0 — both signed zeros map to positive zero."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([0.0, -0.0], dtype=dt)
-        assert_bit_aligned(cpp.sign(a), np.sign(a), f"sign(±0) {dt.__name__}")
-
-
-# --- reciprocal (1/x) ---
-
-def test_reciprocal_basic(cpp, dtype):
-    """reciprocal(1/x) — basic values bit-exact vs numpy."""
-    a = random_array((128,), dtype=dtype)
-    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), f"reciprocal {dtype.__name__}")
-
-def test_reciprocal_zero_f32(cpp):
-    """1/0 → +inf, 1/−0 → −inf, 1/inf → 0, 1/−inf → −0."""
-    a = np.array([0.0, -0.0, np.inf, -np.inf], dtype=np.float32)
-    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), "reciprocal edges f32")
-
-def test_reciprocal_zero_f64(cpp):
-    """1/0 → +inf, 1/−0 → −inf, 1/inf → 0, 1/−inf → −0."""
-    a = np.array([0.0, -0.0, np.inf, -np.inf], dtype=np.float64)
-    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), "reciprocal edges f64")
-
-def test_reciprocal_nan(cpp):
-    """1/NaN → NaN."""
-    a = np.array([np.nan], dtype=np.float32)
-    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), "reciprocal nan f32")
-
-def test_reciprocal_special_values(cpp, dtype):
-    """reciprocal preserves special values: ±inf, ±0, NaN passthrough."""
-    if dtype == np.float64:
-        a = np.array([0.0, -0.0, 1.0, -1.0, 2.0, np.inf, -np.inf, np.nan], dtype=dtype)
-    else:
-        a = np.array([0.0, -0.0, 1.0, -1.0, 2.0, np.inf, -np.inf, np.nan], dtype=dtype)
-    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), f"reciprocal special {dtype.__name__}")
-
-def test_reciprocal_random(cpp, dtype):
-    """reciprocal large random arrays — bit-identical to numpy."""
-    a = random_array((1024,), dtype=dtype)
-    assert_bit_aligned(cpp.reciprocal(a), np.reciprocal(a), f"reciprocal large {dtype.__name__}")
-
-
-# --- unwrap NaN propagation ---
-
-def test_unwrap_nan_propagation(cpp):
-    """NaN element in unwrap must propagate through subsequent output values."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([0.0, 1.0, np.nan, 2.0, 3.0], dtype=dt)
-        assert_bit_aligned(cpp.unwrap(a), np.unwrap(a),
-                           f"unwrap(nan mid) {dt.__name__}")
-
-
-def test_unwrap_nan_leading(cpp):
-    """NaN as first element of unwrap input."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.nan, 1.0, 2.0, 3.0], dtype=dt)
-        assert_bit_aligned(cpp.unwrap(a), np.unwrap(a),
-                           f"unwrap(nan first) {dt.__name__}")
-
-
-def test_unwrap_nan_all_nan(cpp):
-    """All-NaN unwrap input."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.nan, np.nan, np.nan], dtype=dt)
-        assert_bit_aligned(cpp.unwrap(a), np.unwrap(a),
-                           f"unwrap(all nan) {dt.__name__}")
-
-
-# --- linalg special values ---
-
-def test_linalg_norm_nan(cpp):
-    """linalg.norm of array with NaN must produce NaN (not a finite value)."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([1.0, np.nan, 2.0], dtype=dt)
-        r = float(np.asarray(cpp.linalg.norm(a)).item())
-        assert np.isnan(r), \
-               f"linalg.norm(nan array) should be NaN, got {r} ({dt.__name__})"
-
-
-def test_linalg_norm_inf(cpp):
-    """linalg.norm of array with +∞ must produce +∞."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([1.0, np.inf, 2.0], dtype=dt)
-        r = float(np.asarray(cpp.linalg.norm(a)).item())
-        assert np.isinf(r), \
-               f"linalg.norm(inf array) should be Inf, got {r} ({dt.__name__})"
-
-
-def test_dot_nan(cpp):
-    """dot product with NaN operand must produce NaN."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([1.0, np.nan, 3.0], dtype=dt)
-        b = np.array([4.0, 5.0, 6.0], dtype=dt)
-        r = float(np.asarray(cpp.dot(a, b)).item())
-        assert np.isnan(r), \
-               f"dot(nan,...) should be NaN, got {r} ({dt.__name__})"
-
-
-def test_dot_inf(cpp):
-    """dot([+∞, 0], [1, 0]) = +∞ — infinity propagates through dot."""
-    for dt in [np.float32, np.float64]:
-        a = np.array([np.inf, 0.0], dtype=dt)
-        b = np.array([1.0,    0.0], dtype=dt)
-        r    = float(np.asarray(cpp.dot(a, b)).item())
-        py_r = float(np.dot(a, b))
-        # Both should be +inf (or consistently NaN if BLAS treats it that way)
-        assert (np.isinf(r) and r > 0) == (np.isinf(py_r) and py_r > 0) or \
-               (np.isnan(r) and np.isnan(py_r)), \
-               f"dot(inf,...): C++={r} vs numpy={py_r} ({dt.__name__})"
-
-
-# --- AVX-512 boundary sizes for normal inputs ---
-
-@pytest.mark.parametrize("fn_name,np_fn", [
-    ("exp",    np.exp),
-    ("log",    np.log),
-    ("sin",    np.sin),
-    ("cos",    np.cos),
-], ids=["exp", "log", "sin", "cos"])
-@pytest.mark.parametrize("n", [15, 16, 17, 32], ids=["n15", "n16", "n17", "n32"])
-def test_avx512_boundary_f32(fn_name, np_fn, n, cpp):
-    """Normal finite values at exact AVX-512 vector boundary sizes (f32)."""
-    rng = np.random.RandomState(42)
-    a = (np.abs(rng.randn(n)) + 0.1).astype(np.float32)
-    assert_bit_aligned(getattr(cpp, fn_name)(a), np_fn(a),
-                       f"{fn_name} f32 n={n}")
-
+# ═══════════════════════════════════════════════════════════════════════════════
+# build_all_tests — catalog → pytest.param
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_all_tests():
+    """将 api_catalog() 展开为 pytest 参数化列表。"""
+    for tc in api_catalog():
+        test_id = f"{tc.api_name}[{tc.dtype_label}][{tc.category}]"
+        yield pytest.param(tc, id=test_id)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 唯一的参数化测试函数 + report.csv 收集
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_REPORT_ROWS = []  # 全局收集: [{category, api, mode, dtype, feature, result, ulp}]
+
+
+def _ulp_diff(cpp_r, py_r):
+    """返回 C++ 与 numpy 结果的最大 ULP 差异。无法比较时返回 -1。"""
+    cpp = np.asarray(cpp_r)
+    py  = np.asarray(py_r)
+    if cpp.dtype.kind != 'f' or cpp.dtype != py.dtype:
+        return -1
+    if cpp.size == 0:
+        return 0
+    sz = cpp.itemsize
+    if sz not in (4, 8):
+        return -1
+    uint_t = np.uint32 if sz == 4 else np.uint64
+    cu = cpp.ravel().view(uint_t).astype(np.int64)
+    pu = py.ravel().view(uint_t).astype(np.int64)
+    return int(np.max(np.abs(cu - pu)))
+
+
+def _compile_mode(cpp):
+    """检测编译模式: 'bit_exact' 或 'std'。"""
+    try:
+        return cpp.compile_mode()
+    except AttributeError:
+        return "unknown"
+
+
+@pytest.mark.parametrize("tc", list(build_all_tests()))
+def test_api(tc, cpp):
+    """全量测试: F5→F1→F2→F4→F3 流水线 + 记录 report 行。"""
+    api_name  = tc.api_name
+    args      = tc.args
+    kwargs    = tc.kwargs
+    strategy  = tc.cmp_strategy
+    check_py  = tc.check_py
+
+    # 原地修改类 API：先 copy，调用后再比对 copy
+    if tc.setup_fn is not None:
+        tc.setup_fn(args, kwargs)
+        _REPORT_ROWS.append(dict(
+            category=tc.group, api=api_name, mode=_compile_mode(cpp),
+            dtype=tc.dtype_label, feature=tc.category,
+            result="SKIP", ulp=-1))
+        return
+
+    cpp_r, py_r = call_cpp_py(api_name, cpp, *args, **kwargs)
+    if check_py and py_r is None:
+        _REPORT_ROWS.append(dict(
+            category=tc.group, api=api_name, mode=_compile_mode(cpp),
+            dtype=tc.dtype_label, feature=tc.category,
+            result="SKIP", ulp=-1))
+        pytest.skip(f"no numpy equivalent for {api_name}")
+
+    ulp = _ulp_diff(cpp_r, py_r) if strategy == "bit_exact" else -1
+    try:
+        compare(cpp_r, py_r, strategy=strategy, label=f"{api_name}")
+        _REPORT_ROWS.append(dict(
+            category=tc.group, api=api_name, mode=_compile_mode(cpp),
+            dtype=tc.dtype_label, feature=tc.category,
+            result="PASS", ulp=ulp))
+    except AssertionError:
+        _REPORT_ROWS.append(dict(
+            category=tc.group, api=api_name, mode=_compile_mode(cpp),
+            dtype=tc.dtype_label, feature=tc.category,
+            result="FAIL", ulp=ulp))
+        raise
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _write_report_csv():
+    """全部测试结束后写 report.csv。"""
+    yield
+    import csv
+    fname = os.environ.get("REPORT_CSV", "report.csv")
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), fname)
+    if not _REPORT_ROWS:
+        return
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["category", "api", "mode", "dtype",
+                                          "feature", "result", "ulp"])
+        w.writeheader()
+        w.writerows(_REPORT_ROWS)
+    print(f"\nreport.csv: {len(_REPORT_ROWS)} rows → {path}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# __main__
+# ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    import sys, os
+    import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     sys.exit(pytest.main([__file__, "-q", "--tb=short", "--no-header"]))
-
-
-# =============================================================================
-# Section 17: numpy.matmul — bit-exact via cblas_sgemm64_ / cblas_sgemv64_
-# =============================================================================
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["float64","float32"])
-@pytest.mark.parametrize("M,K,N", [
-    (1,  1,  1),
-    (3,  4,  5),
-    (5,  3,  1),
-    (1,  8,  4),
-    (16, 16, 16),
-    (50, 64, 50),
-    (100,100,100),
-], ids=["1x1x1","3x4x5","5x3x1","1x8x4","16x16x16","50x64x50","100x100x100"])
-def test_matmul_2d(dtype, M, K, N, cpp):
-    """2D matmul: C(M,N) = A(M,K) @ B(K,N)  — cblas_sgemm64_, 0 ULP."""
-    rng = np.random.RandomState(M * 1000 + K * 100 + N)
-    A = rng.randn(M, K).astype(dtype)
-    B = rng.randn(K, N).astype(dtype)
-    assert_bit_aligned(cpp.matmul(A, B), np.matmul(A, B),
-                       f"matmul 2D ({M},{K})@({K},{N}) {dtype.__name__}")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["float64","float32"])
-@pytest.mark.parametrize("K,N", [(1,1),(8,5),(16,7),(64,32)],
-                          ids=["1x1","8x5","16x7","64x32"])
-def test_matmul_1d_2d(dtype, K, N, cpp):
-    """1D × 2D matmul: y(N,) = a(K,) @ B(K,N)  — cblas_sgemv64_ Trans, 0 ULP."""
-    rng = np.random.RandomState(K * 100 + N)
-    a = rng.randn(K).astype(dtype)
-    B = rng.randn(K, N).astype(dtype)
-    assert_bit_aligned(cpp.matmul(a, B), np.matmul(a, B),
-                       f"matmul 1D×2D ({K},)@({K},{N}) {dtype.__name__}")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["float64","float32"])
-@pytest.mark.parametrize("M,K", [(1,1),(5,8),(7,16),(32,64)],
-                          ids=["1x1","5x8","7x16","32x64"])
-def test_matmul_2d_1d(dtype, M, K, cpp):
-    """2D × 1D matmul: y(M,) = A(M,K) @ x(K,)  — cblas_sgemv64_ NoTrans, 0 ULP."""
-    rng = np.random.RandomState(M * 100 + K)
-    A = rng.randn(M, K).astype(dtype)
-    x = rng.randn(K).astype(dtype)
-    assert_bit_aligned(cpp.matmul(A, x), np.matmul(A, x),
-                       f"matmul 2D×1D ({M},{K})@({K},) {dtype.__name__}")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["float64","float32"])
-@pytest.mark.parametrize("batch,M,K,N", [
-    (1, 2, 3, 4),
-    (4, 3, 5, 6),
-    (8, 16, 32, 16),
-    (3, 50, 64, 50),
-], ids=["1x2x3x4","4x3x5x6","8x16x32x16","3x50x64x50"])
-def test_matmul_batched(dtype, batch, M, K, N, cpp):
-    """Batched 3D matmul: C(B,M,N) = A(B,M,K) @ B(B,K,N)  — loop gemm, 0 ULP."""
-    rng = np.random.RandomState(batch * 10000 + M * 1000 + K * 100 + N)
-    A = rng.randn(batch, M, K).astype(dtype)
-    B = rng.randn(batch, K, N).astype(dtype)
-    assert_bit_aligned(cpp.matmul(A, B), np.matmul(A, B),
-                       f"matmul 3D ({batch},{M},{K})@({batch},{K},{N}) {dtype.__name__}")
-
-
-# =============================================================================
-# Section 18: Advanced / Fancy Indexing
-#   numpy.take, numpy.compress, nd_slice (slice with step), numpy.put,
-#   boolean_assign (a[mask]=val), boolean_assign_array (a[mask]=arr),
-#   nd_slice_assign (a[s:s:s]=val), nd_slice_assign_array (a[s:s:s]=arr)
-#
-# All operations must produce bit-level identical results to Python numpy.
-# Gather/scatter ops have no floating-point arithmetic, so bit-exactness is
-# trivially guaranteed — the tests confirm correct element selection & placement.
-# =============================================================================
-
-# ─── helpers ─────────────────────────────────────────────────────────────────
-
-def _si(length, start=None, stop=None, step=1):
-    """Convenience: return (start, stop, step) via slice.indices(length)."""
-    return slice(start, stop, step).indices(length)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 18-A  numpy.take
-# ─────────────────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-@pytest.mark.parametrize("axis", [0, 1, 2], ids=["axis0", "axis1", "axis2"])
-def test_take_3d_axes(dtype, axis, cpp):
-    """take along every axis of a 3-D array — shape and values must match."""
-    rng = np.random.RandomState(axis * 17)
-    a = rng.randn(3, 4, 5).astype(dtype)
-    idx = np.array([0, 2], dtype=np.int64)
-    assert_bit_aligned(cpp.take(a, idx, axis), np.take(a, idx, axis=axis),
-                       f"take 3D axis={axis}")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_take_axis_none_flat(dtype, cpp):
-    """take with axis=None (default -1) gathers from the flattened array."""
-    rng = np.random.RandomState(7)
-    a = rng.randn(4, 5).astype(dtype)
-    idx = np.array([0, 6, 11, 19], dtype=np.int64)
-    assert_bit_aligned(cpp.take(a, idx), np.take(a, idx),
-                       "take axis=None")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_take_negative_indices(dtype, cpp):
-    """Negative indices in take wrap around the axis size."""
-    a = np.arange(6, dtype=dtype)
-    idx = np.array([-1, -2, -6], dtype=np.int64)
-    assert_bit_aligned(cpp.take(a, idx), np.take(a, idx),
-                       "take 1D negative indices")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_take_1d_axis0(dtype, cpp):
-    """take on a 1-D array with axis=0 is the most common fancy-index case."""
-    a = np.array([10, 20, 30, 40, 50], dtype=dtype)
-    idx = np.array([4, 0, 2, 0], dtype=np.int64)
-    assert_bit_aligned(cpp.take(a, idx, 0), np.take(a, idx, axis=0),
-                       "take 1D axis=0 with repeats")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_take_2d_axis1_cols(dtype, cpp):
-    """take selects specific columns from a 2-D matrix."""
-    rng = np.random.RandomState(42)
-    a = rng.randn(5, 7).astype(dtype)
-    idx = np.array([6, 0, 3], dtype=np.int64)
-    assert_bit_aligned(cpp.take(a, idx, 1), np.take(a, idx, axis=1),
-                       "take 2D axis=1 cols")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_take_large_random(dtype, cpp):
-    """take on a large array — ensures no off-by-one at scale."""
-    rng = np.random.RandomState(99)
-    a = rng.randn(100, 50).astype(dtype)
-    idx = np.array(list(range(0, 50, 3)) + list(range(49, 0, -7)), dtype=np.int64)
-    assert_bit_aligned(cpp.take(a, idx, 1), np.take(a, idx, axis=1),
-                       "take large 2D axis=1")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 18-B  numpy.compress (boolean mask gather)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_compress_basic(dtype, cpp):
-    """compress selects elements where the boolean mask is True."""
-    a    = np.array([10, 20, 30, 40, 50], dtype=dtype)
-    mask = np.array([True, False, True, False, True])
-    assert_bit_aligned(cpp.compress(a, mask), np.compress(mask, a),
-                       "compress basic")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_compress_all_true(dtype, cpp):
-    """compress(all-True) == identity."""
-    a    = np.arange(8, dtype=dtype)
-    mask = np.ones(8, dtype=bool)
-    assert_bit_aligned(cpp.compress(a, mask), np.compress(mask, a),
-                       "compress all-true")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_compress_all_false(dtype, cpp):
-    """compress(all-False) → empty output."""
-    a    = np.arange(6, dtype=dtype)
-    mask = np.zeros(6, dtype=bool)
-    cpp_r = np.asarray(cpp.compress(a, mask))
-    np_r  = np.compress(mask, a)
-    assert cpp_r.size == np_r.size == 0, "compress all-false must be empty"
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_compress_2d_flat(dtype, cpp):
-    """compress flattens a 2-D array (axis=None) before applying the mask."""
-    rng  = np.random.RandomState(5)
-    a    = rng.randn(4, 5).astype(dtype)
-    mask = (a.ravel() > 0)
-    assert_bit_aligned(cpp.compress(a, mask), np.compress(mask, a),
-                       "compress 2D flat")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_compress_special_values(dtype, cpp):
-    """compress must pass NaN / ±Inf through unchanged."""
-    a    = np.array([np.nan, np.inf, -np.inf, 1.0, -1.0], dtype=dtype)
-    mask = np.array([True, True, True, False, True])
-    assert_bit_aligned(cpp.compress(a, mask), np.compress(mask, a),
-                       "compress NaN/Inf passthrough")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 18-C  nd_slice — N-D slice with arbitrary per-dimension step
-#
-# Caller passes pre-normalised (start, stop, step) from slice.indices(n).
-# ─────────────────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-@pytest.mark.parametrize("slc,label", [
-    (slice(None, None, 2),    "::2"),
-    (slice(1, 7, 2),          "1:7:2"),
-    (slice(None, None, 3),    "::3"),
-    (slice(2, 9, 3),          "2:9:3"),
-    (slice(None, None, None), "full"),
-], ids=["step2", "1:7:2", "step3", "2:9:3", "full"])
-def test_slice_1d_pos_step(dtype, slc, label, cpp):
-    """1-D nd_slice with positive step produces bit-identical output."""
-    a = np.arange(12, dtype=dtype)
-    st, sp, sv = slc.indices(len(a))
-    assert_bit_aligned(cpp.slice(a, [st], [sp], [sv]), a[slc],
-                       f"slice 1D {label}")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-@pytest.mark.parametrize("slc,label", [
-    (slice(None, None, -1), "::-1"),
-    (slice(None, None, -2), "::-2"),
-    (slice(8, 1, -3),       "8:1:-3"),
-    (slice(6, 0, -2),       "6:0:-2"),
-], ids=["rev1", "rev2", "8:1:-3", "6:0:-2"])
-def test_slice_1d_neg_step(dtype, slc, label, cpp):
-    """1-D nd_slice with negative step (reverse / stride) matches numpy."""
-    a = np.arange(10, dtype=dtype)
-    st, sp, sv = slc.indices(len(a))
-    assert_bit_aligned(cpp.slice(a, [st], [sp], [sv]), a[slc],
-                       f"slice 1D {label}")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-@pytest.mark.parametrize("row_slc,col_slc,label", [
-    (slice(1, 3),          slice(2, 5),          "[1:3, 2:5]"),
-    (slice(None),          slice(None, None, 2), "[:, ::2]"),
-    (slice(None, None, 2), slice(None),          "[::2, :]"),
-    (slice(None, None, 2), slice(None, None, 3), "[::2, ::3]"),
-    (slice(None, None, -1),slice(None, None, -1),"[::-1, ::-1]"),
-    (slice(0, 4, 2),       slice(1, 5, 2),       "[0:4:2, 1:5:2]"),
-], ids=["1:3-2:5", ":-::2", "::2-:", "::2-::3", "rev-rev", "stride2d"])
-def test_slice_2d(dtype, row_slc, col_slc, label, cpp):
-    """2-D nd_slice with all step combinations matches numpy."""
-    rng = np.random.RandomState(hash(label) % (2**31))
-    a   = rng.randn(6, 8).astype(dtype)
-    st0, sp0, sv0 = row_slc.indices(a.shape[0])
-    st1, sp1, sv1 = col_slc.indices(a.shape[1])
-    assert_bit_aligned(
-        cpp.slice(a, [st0, st1], [sp0, sp1], [sv0, sv1]),
-        a[row_slc, col_slc],
-        f"slice 2D {label}")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_slice_3d(dtype, cpp):
-    """3-D nd_slice: a[::2, 1:4, ::3] on a (5,6,7) array."""
-    rng = np.random.RandomState(11)
-    a   = rng.randn(5, 6, 7).astype(dtype)
-    s0  = slice(None, None, 2)
-    s1  = slice(1, 4)
-    s2  = slice(None, None, 3)
-    t0, p0, v0 = s0.indices(5)
-    t1, p1, v1 = s1.indices(6)
-    t2, p2, v2 = s2.indices(7)
-    assert_bit_aligned(
-        cpp.slice(a, [t0,t1,t2], [p0,p1,p2], [v0,v1,v2]),
-        a[s0, s1, s2],
-        "slice 3D")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_slice_special_values(dtype, cpp):
-    """slice must pass NaN / ±Inf through bit-identically."""
-    a = np.array([np.nan, 1.0, np.inf, 2.0, -np.inf, 3.0], dtype=dtype)
-    slc = slice(None, None, 2)   # selects indices 0, 2, 4
-    st, sp, sv = slc.indices(len(a))
-    assert_bit_aligned(cpp.slice(a, [st], [sp], [sv]), a[slc],
-                       "slice NaN/Inf passthrough")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 18-D  numpy.put (in-place scatter)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_put_basic(dtype, cpp):
-    """put writes values at specified flat indices."""
-    a   = np.zeros(8, dtype=dtype)
-    idx = np.array([0, 3, 7], dtype=np.int64)
-    val = np.array([1.0, 2.0, 3.0], dtype=dtype)
-    py_a = np.zeros(8, dtype=dtype); np.put(py_a, idx, val)
-    cpp.put(a, idx, val)
-    assert_bit_aligned(a, py_a, "put basic")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_put_negative_indices(dtype, cpp):
-    """put with negative indices: idx < 0  →  idx += n."""
-    a   = np.zeros(6, dtype=dtype)
-    idx = np.array([-1, -3, -6], dtype=np.int64)
-    val = np.array([10.0, 20.0, 30.0], dtype=dtype)
-    py_a = np.zeros(6, dtype=dtype); np.put(py_a, idx, val)
-    cpp.put(a, idx, val)
-    assert_bit_aligned(a, py_a, "put negative")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_put_overwrite(dtype, cpp):
-    """When indices repeat, the last write wins — matching numpy."""
-    a   = np.zeros(4, dtype=dtype)
-    idx = np.array([1, 1, 1], dtype=np.int64)
-    val = np.array([5.0, 6.0, 7.0], dtype=dtype)
-    py_a = np.zeros(4, dtype=dtype); np.put(py_a, idx, val)
-    cpp.put(a, idx, val)
-    assert_bit_aligned(a, py_a, "put repeat index")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_put_special_values(dtype, cpp):
-    """put must store NaN / ±Inf bit-identically."""
-    a   = np.zeros(5, dtype=dtype)
-    idx = np.array([0, 1, 2], dtype=np.int64)
-    val = np.array([np.nan, np.inf, -np.inf], dtype=dtype)
-    py_a = np.zeros(5, dtype=dtype); np.put(py_a, idx, val)
-    cpp.put(a, idx, val)
-    assert_bit_aligned(a, py_a, "put NaN/Inf")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_put_2d_flat(dtype, cpp):
-    """put into a 2-D array uses flat indexing (row-major)."""
-    a   = np.zeros((3, 4), dtype=dtype)
-    idx = np.array([0, 5, 11], dtype=np.int64)
-    val = np.array([1.0, 2.0, 3.0], dtype=dtype)
-    py_a = np.zeros((3, 4), dtype=dtype); np.put(py_a, idx, val)
-    cpp.put(a, idx, val)
-    assert_bit_aligned(a, py_a, "put 2D flat index")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 18-E  boolean_assign (a[mask] = scalar  and  a[mask] = array)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_putmask_scalar_basic(dtype, cpp):
-    """a[mask] = scalar sets every True position to the given value."""
-    a    = np.arange(6, dtype=dtype)
-    mask = np.array([True, False, True, True, False, True])
-    fill = dtype(99.0)
-    py_a = a.copy(); py_a[mask] = fill
-    cpp.putmask(a, mask, fill)
-    assert_bit_aligned(a, py_a, "putmask scalar")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_putmask_scalar_nan(dtype, cpp):
-    """putmask with NaN fill must write NaN bits exactly."""
-    a    = np.zeros(5, dtype=dtype)
-    mask = np.array([True, False, True, False, True])
-    fill = dtype(np.nan)
-    py_a = a.copy(); py_a[mask] = fill
-    cpp.putmask(a, mask, fill)
-    assert_bit_aligned(a, py_a, "putmask NaN")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_putmask_scalar_all_false(dtype, cpp):
-    """putmask with all-False mask leaves the array unchanged."""
-    a    = np.arange(5, dtype=dtype)
-    mask = np.zeros(5, dtype=bool)
-    orig = a.copy()
-    cpp.putmask(a, mask, dtype(42.0))
-    assert_bit_aligned(a, orig, "putmask all-false no-op")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_putmask_scalar_all_true(dtype, cpp):
-    """putmask with all-True mask sets every element."""
-    a    = np.arange(5, dtype=dtype)
-    mask = np.ones(5, dtype=bool)
-    fill = dtype(-1.0)
-    py_a = a.copy(); py_a[mask] = fill
-    cpp.putmask(a, mask, fill)
-    assert_bit_aligned(a, py_a, "putmask all-true")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_putmask_array_basic(dtype, cpp):
-    """a[mask] = array assigns successive values to True positions."""
-    a    = np.zeros(8, dtype=dtype)
-    mask = np.array([True, False, True, True, False, True, False, True])
-    vals = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)  # 5 trues
-    py_a = a.copy(); py_a[mask] = vals
-    cpp.putmask(a, mask, vals)
-    assert_bit_aligned(a, py_a, "putmask_array basic")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_putmask_array_special(dtype, cpp):
-    """putmask_array with NaN / ±Inf values is bit-exact."""
-    a    = np.zeros(6, dtype=dtype)
-    mask = np.array([True, False, True, False, True, True])
-    vals = np.array([np.nan, np.inf, -np.inf, 0.0], dtype=dtype)
-    py_a = a.copy(); py_a[mask] = vals
-    cpp.putmask(a, mask, vals)
-    assert_bit_aligned(a, py_a, "putmask_array NaN/Inf")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_putmask_2d(dtype, cpp):
-    """putmask on 2-D array: pass the mask as a flat array.
-
-    numpy's a[mask] = val with a same-shape bool mask iterates elements flat.
-    Our C++ API also treats mask and array flat, so we flatten the mask first.
-    """
-    rng  = np.random.RandomState(42)
-    a    = rng.randn(4, 5).astype(dtype)
-    mask_2d   = a > 0                  # shape (4, 5) — same shape as a
-    flat_mask = mask_2d.ravel()        # flatten for our flat C++ API
-    fill = dtype(-999.0)
-    py_a = a.copy(); py_a[mask_2d] = fill
-    cpp.putmask(a, flat_mask, fill)
-    assert_bit_aligned(a, py_a, "putmask 2D flat mask")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 18-F  nd_slice_assign — in-place slice assignment
-# ─────────────────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-@pytest.mark.parametrize("slc,label", [
-    (slice(None, None, 2), "::2"),
-    (slice(1, 8, 3),       "1:8:3"),
-    (slice(None, None, -1),"::-1"),
-    (slice(None, None, -2),"::-2"),
-], ids=["::2", "1:8:3", "::-1", "::-2"])
-def test_slice_assign_1d_scalar(dtype, slc, label, cpp):
-    """a[start:stop:step] = scalar in-place, 1-D array."""
-    n    = 10
-    a    = np.arange(n, dtype=dtype)
-    fill = dtype(77.0)
-    py_a = a.copy(); py_a[slc] = fill
-    st, sp, sv = slc.indices(n)
-    cpp.slice_assign(a, [st], [sp], [sv], fill)
-    assert_bit_aligned(a, py_a, f"slice_assign 1D scalar {label}")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_slice_assign_2d_scalar(dtype, cpp):
-    """a[::2, ::3] = scalar covers a 2-D strided slice."""
-    rng = np.random.RandomState(7)
-    a   = rng.randn(6, 9).astype(dtype)
-    s0  = slice(None, None, 2)
-    s1  = slice(None, None, 3)
-    fill = dtype(-5.0)
-    py_a = a.copy(); py_a[s0, s1] = fill
-    t0, p0, v0 = s0.indices(6)
-    t1, p1, v1 = s1.indices(9)
-    cpp.slice_assign(a, [t0, t1], [p0, p1], [v0, v1], fill)
-    assert_bit_aligned(a, py_a, "slice_assign 2D scalar")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_slice_assign_1d_array(dtype, cpp):
-    """a[::2] = array writes each value to successive selected positions."""
-    n   = 10
-    a   = np.zeros(n, dtype=dtype)
-    slc = slice(None, None, 2)    # selects 5 positions
-    vals = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
-    py_a = a.copy(); py_a[slc] = vals
-    st, sp, sv = slc.indices(n)
-    cpp.slice_assign(a, [st], [sp], [sv], vals)
-    assert_bit_aligned(a, py_a, "slice_assign 1D array")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_slice_assign_2d_array(dtype, cpp):
-    """a[1:3, 1:4] = array writes a contiguous block."""
-    rng  = np.random.RandomState(3)
-    a    = rng.randn(5, 6).astype(dtype)
-    s0   = slice(1, 3)
-    s1   = slice(1, 4)
-    vals = rng.randn(2, 3).astype(dtype)   # 2×3 = 6 values
-    py_a = a.copy(); py_a[s0, s1] = vals
-    t0, p0, v0 = s0.indices(5)
-    t1, p1, v1 = s1.indices(6)
-    cpp.slice_assign(a, [t0, t1], [p0, p1], [v0, v1],
-                              vals.ravel())   # flatten for our API
-    assert_bit_aligned(a, py_a, "slice_assign 2D array")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_slice_assign_scalar_nan(dtype, cpp):
-    """slice_assign with NaN fill writes exact NaN bits."""
-    a   = np.zeros(8, dtype=dtype)
-    slc = slice(1, 7, 2)
-    py_a = a.copy(); py_a[slc] = dtype(np.nan)
-    st, sp, sv = slc.indices(8)
-    cpp.slice_assign(a, [st], [sp], [sv], dtype(np.nan))
-    assert_bit_aligned(a, py_a, "slice_assign NaN fill")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_slice_assign_reverse_write(dtype, cpp):
-    """a[::-1] = distinct_values writes in reverse element order.
-
-    Python:   a[::-1] = [10,20,30,40,50,60]
-      sets a[5]=10, a[4]=20, ..., a[0]=60  →  a = [60,50,40,30,20,10]
-
-    C++ nd_slice_assign_array with (start=5, stop=-1, step=-1):
-      out_idx=0 → dst[5]=vals[0]=10, ..., out_idx=5 → dst[0]=vals[5]=60
-    Both produce the same result.
-    """
-    n    = 6
-    a    = np.zeros(n, dtype=dtype)
-    vals = np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0], dtype=dtype)
-    slc  = slice(None, None, -1)
-    py_a = a.copy(); py_a[slc] = vals
-    st, sp, sv = slc.indices(n)
-    cpp.slice_assign(a, [st], [sp], [sv], vals)
-    assert_bit_aligned(a, py_a, "slice_assign reverse write")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 18-G  Combined / integration tests
-# ─────────────────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_fancy_then_slice(dtype, cpp):
-    """take + nd_slice chained — fancy-gather rows, then slice columns."""
-    rng = np.random.RandomState(21)
-    a   = rng.randn(8, 10).astype(dtype)
-    row_idx = np.array([0, 3, 7], dtype=np.int64)
-    col_slc = slice(2, 8, 2)
-    # Python: a[[0,3,7], 2:8:2]
-    py_r = a[row_idx][:, col_slc]
-    # C++: take rows, then nd_slice cols
-    cpp_rows = cpp.take(a, row_idx, 0)
-    t, p, v  = col_slc.indices(10)
-    cpp_r    = cpp.slice(cpp_rows, [0, t], [3, p], [1, v])
-    assert_bit_aligned(cpp_r, py_r, "take then nd_slice")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_compress_then_put_roundtrip(dtype, cpp):
-    """compress extracts, put writes back — round-trip is identity."""
-    rng  = np.random.RandomState(55)
-    a    = rng.randn(10).astype(dtype)
-    mask = a > 0
-    idx  = np.flatnonzero(mask).astype(np.int64)
-    vals = np.asarray(cpp.compress(a, mask))
-    out  = np.zeros(10, dtype=dtype)
-    cpp.put(out, idx, vals)
-    # out should equal a at positive positions, 0 elsewhere
-    py_out = np.zeros(10, dtype=dtype)
-    py_out[mask] = a[mask]
-    assert_bit_aligned(out, py_out, "compress→put roundtrip")
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32], ids=["f64", "f32"])
-def test_slice_empty_result(dtype, cpp):
-    """slice with stop <= start (positive step) must return empty array."""
-    a   = np.arange(5, dtype=dtype)
-    # slice(5, 5, 1) → empty
-    cpp_r = np.asarray(cpp.slice(a, [5], [5], [1]))
-    np_r  = a[5:5:1]
-    assert cpp_r.size == np_r.size == 0, "empty slice must produce empty array"
