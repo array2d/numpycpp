@@ -49,6 +49,32 @@ PYBIND11_MODULE(numpycpp, m) {
 #endif
     });
 
+    // -- astype dtype 匹配诊断 -------------------------------------------------
+    //  返回 arr 的 dtype 匹配详情，用于验证 py::dtype::of<T>() vs kind()+itemsize 行为
+    m.def("_diag_astype_dtype", [](const py::array& arr) -> py::dict {
+        auto buf = arr.request();
+        auto dt  = arr.dtype();
+
+        char kind = dt.kind();
+        bool is_f32 = (kind == 'f' && buf.itemsize == 4);
+        bool is_f64 = (kind == 'f' && buf.itemsize == 8);
+
+        bool dt_of_f32 = dt.is(py::dtype::of<float>());
+        bool dt_of_f64 = dt.is(py::dtype::of<double>());
+
+        py::dict result;
+        result["dtype_str"]       = py::str(dt);
+        result["kind"]            = std::string(1, kind);
+        result["itemsize"]        = buf.itemsize;
+        result["format"]          = buf.format;
+        result["is_f32(kind)"]    = is_f32;
+        result["is_f64(kind)"]    = is_f64;
+        result["dtype.is(float)"] = dt_of_f32;
+        result["dtype.is(double)"]= dt_of_f64;
+        result["fallback_works"]  = (is_f32 || is_f64 || dt_of_f32 || dt_of_f64);
+        return result;
+    });
+
     // -- linalg submodule --------------------------------------------------
     py::module_ la = m.def_submodule("linalg", "numpy.linalg equivalents");
     la.def("norm", static_cast<float(*)(const py::array_t<float>&)>(&numpy::linalg::norm));
