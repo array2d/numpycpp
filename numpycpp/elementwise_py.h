@@ -276,6 +276,8 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     }
 
     // float64
+    _ASTYPE_CASE(double, "float64", double)  // 自转换
+    _ASTYPE_CASE(double, "double",  double)
     _ASTYPE_CASE(double, "float32", float)
     _ASTYPE_CASE(double, "float",   float)
     _ASTYPE_CASE(double, "int",     int)
@@ -285,11 +287,15 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     // float32
     _ASTYPE_CASE(float, "float64", double)
     _ASTYPE_CASE(float, "double",  double)
+    _ASTYPE_CASE(float, "float",   double)   // numpy 约定: np.float32(1).astype(float) → float64
+    _ASTYPE_CASE(float, "float32", float)    // 自转换: 无操作
     _ASTYPE_CASE(float, "int",     int)
     _ASTYPE_CASE(float, "int32",   int)
     _ASTYPE_CASE(float, "int64",   int64_t)
     _ASTYPE_CASE(float, "bool",    bool)
     // int32
+    _ASTYPE_CASE(int, "int32",   int)     // 自转换
+    _ASTYPE_CASE(int, "int",     int)
     _ASTYPE_CASE(int, "float64", double)
     _ASTYPE_CASE(int, "double",  double)
     _ASTYPE_CASE(int, "float32", float)
@@ -297,6 +303,7 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     _ASTYPE_CASE(int, "int64",   int64_t)
     _ASTYPE_CASE(int, "bool",    bool)
     // int64
+    _ASTYPE_CASE(int64_t, "int64",   int64_t)  // 自转换
     _ASTYPE_CASE(int64_t, "float64", double)
     _ASTYPE_CASE(int64_t, "double",  double)
     _ASTYPE_CASE(int64_t, "float32", float)
@@ -305,6 +312,7 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     _ASTYPE_CASE(int64_t, "int32",   int)
     _ASTYPE_CASE(int64_t, "bool",    bool)
     // bool
+    _ASTYPE_CASE(bool, "bool",    bool)    // 自转换
     _ASTYPE_CASE(bool, "float64", double)
     _ASTYPE_CASE(bool, "double",  double)
     _ASTYPE_CASE(bool, "float32", float)
@@ -314,8 +322,10 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     _ASTYPE_CASE(bool, "int64",   int64_t)
 #undef _ASTYPE_CASE
 
-    throw std::runtime_error("astype: unsupported conversion " +
-                             std::string(py::str(dt)) + " -> " + dtype);
+    throw std::runtime_error(
+        "astype: unsupported conversion " + std::string(py::str(dt)) +
+        " -> " + dtype + ".  Available targets: float64/double, float32/float, "
+        "int/int32, int64, bool.  Also accepts self-conversion (e.g. float32->float32).");
 }
 
 /// float64 → float32 → float64 roundtrip
