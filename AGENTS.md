@@ -9,7 +9,7 @@
 真实案例：`blas_bridge.h` 中的 `find_openblas_path()` 匹配到了 scipy 的 LP64
 OpenBLAS 而非 numpy 的 ILP64 OpenBLAS。`dlsym("dgesv_64_")` 返回 nullptr，
 但代码静默 fallback 到 `return false` / 返回零矩阵，导致 5000 个矩阵的 inv
-全部错误 —— 没有任何异常、没有任何报错。排查这个 0‑ULP 偏差的根因花费了数小时。
+全部错误 —— 没有任何异常、没有任何报错。排查这个 0‑ULP 偏差的根因花费了数周。
 
 **规则：**
 
