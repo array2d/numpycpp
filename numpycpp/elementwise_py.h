@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <cstdint>
+#include <type_traits>
 
 namespace py = pybind11;
 
@@ -267,8 +268,25 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     auto buf = arr.request();
     auto dt  = arr.dtype();
 
+    // py::dtype::of<float>() / py::dtype::of<double>() 在 Python 传入的
+    // numpy 数组上可能不匹配（已知 pybind11 问题）。用 dtype.kind() + itemsize 回退。
+    char _kind = dt.kind();
+    bool _is_f32 = (_kind == 'f' && buf.itemsize == 4);
+    bool _is_f64 = (_kind == 'f' && buf.itemsize == 8);
+    bool _is_i32 = (_kind == 'i' && buf.itemsize == 4);
+    bool _is_i64 = (_kind == 'i' && buf.itemsize == 8);
+    bool _is_bool = (_kind == 'b');
+
+#define _ASTYPE_MATCH(SrcT) \
+    (dt.is(py::dtype::of<SrcT>()) || \
+     (std::is_same<SrcT, float>::value  && _is_f32) || \
+     (std::is_same<SrcT, double>::value && _is_f64) || \
+     (std::is_same<SrcT, int>::value    && _is_i32) || \
+     (std::is_same<SrcT, int64_t>::value&& _is_i64) || \
+     (std::is_same<SrcT, bool>::value   && _is_bool))
+
 #define _ASTYPE_CASE(SrcT, dst_str, DstT) \
-    if (dt.is(py::dtype::of<SrcT>()) && (dtype == dst_str)) { \
+    if (_ASTYPE_MATCH(SrcT) && (dtype == dst_str)) { \
         py::array_t<DstT> r(buf.shape); \
         numpy::astype<DstT, SrcT>(static_cast<const SrcT*>(buf.ptr), \
                                    static_cast<DstT*>(r.request().ptr), buf.size); \
@@ -276,7 +294,7 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     }
 
     // float64
-    _ASTYPE_CASE(double, "float64", double)  // 自转换
+    _ASTYPE_CASE(double, "float64", double)
     _ASTYPE_CASE(double, "double",  double)
     _ASTYPE_CASE(double, "float32", float)
     _ASTYPE_CASE(double, "float",   float)
@@ -287,14 +305,14 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     // float32
     _ASTYPE_CASE(float, "float64", double)
     _ASTYPE_CASE(float, "double",  double)
-    _ASTYPE_CASE(float, "float",   double)   // numpy 约定: np.float32(1).astype(float) → float64
-    _ASTYPE_CASE(float, "float32", float)    // 自转换: 无操作
+    _ASTYPE_CASE(float, "float",   double)
+    _ASTYPE_CASE(float, "float32", float)
     _ASTYPE_CASE(float, "int",     int)
     _ASTYPE_CASE(float, "int32",   int)
     _ASTYPE_CASE(float, "int64",   int64_t)
     _ASTYPE_CASE(float, "bool",    bool)
     // int32
-    _ASTYPE_CASE(int, "int32",   int)     // 自转换
+    _ASTYPE_CASE(int, "int32",   int)
     _ASTYPE_CASE(int, "int",     int)
     _ASTYPE_CASE(int, "float64", double)
     _ASTYPE_CASE(int, "double",  double)
@@ -303,7 +321,7 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     _ASTYPE_CASE(int, "int64",   int64_t)
     _ASTYPE_CASE(int, "bool",    bool)
     // int64
-    _ASTYPE_CASE(int64_t, "int64",   int64_t)  // 自转换
+    _ASTYPE_CASE(int64_t, "int64",   int64_t)
     _ASTYPE_CASE(int64_t, "float64", double)
     _ASTYPE_CASE(int64_t, "double",  double)
     _ASTYPE_CASE(int64_t, "float32", float)
@@ -312,7 +330,7 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     _ASTYPE_CASE(int64_t, "int32",   int)
     _ASTYPE_CASE(int64_t, "bool",    bool)
     // bool
-    _ASTYPE_CASE(bool, "bool",    bool)    // 自转换
+    _ASTYPE_CASE(bool, "bool",    bool)
     _ASTYPE_CASE(bool, "float64", double)
     _ASTYPE_CASE(bool, "double",  double)
     _ASTYPE_CASE(bool, "float32", float)
@@ -321,11 +339,12 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     _ASTYPE_CASE(bool, "int32",   int)
     _ASTYPE_CASE(bool, "int64",   int64_t)
 #undef _ASTYPE_CASE
+#undef _ASTYPE_MATCH
 
     throw std::runtime_error(
         "astype: unsupported conversion " + std::string(py::str(dt)) +
         " -> " + dtype + ".  Available targets: float64/double, float32/float, "
-        "int/int32, int64, bool.  Also accepts self-conversion (e.g. float32->float32).");
+        "int/int32, int64, bool.");
 }
 
 /// float64 → float32 → float64 roundtrip
