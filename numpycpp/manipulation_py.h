@@ -478,12 +478,12 @@ py::array_t<T> take(const py::array_t<T>& arr,
 
 // ── numpy.compress ────────────────────────────────────────────────────────────
 
-/// numpy.compress(condition, a)
+/// numpy.compress(condition, a) — condition FIRST, matching numpy's order
 template<typename T>
-py::array_t<T> compress(const py::array_t<T>& arr,
-                         const py::array_t<bool>& mask) {
-    auto buf  = arr.request();
-    auto mbuf = mask.request();
+py::array_t<T> compress(const py::array_t<bool>& condition,
+                         const py::array_t<T>& a) {
+    auto mbuf = condition.request();
+    auto buf  = a.request();
     size_t use = static_cast<size_t>(std::min(buf.size, mbuf.size));
     const bool* m = static_cast<const bool*>(mbuf.ptr);
     size_t cnt = 0;

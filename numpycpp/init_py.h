@@ -215,20 +215,22 @@ inline py::array geomspace(py::object start_o, py::object stop_o,
 
 // ── numpy.eye ────────────────────────────────────────────────────────────────
 
-/// numpy.eye(N, M=N, k=0, dtype=float64)
+/// numpy.eye(N, M=None, k=0, dtype=float64) — M=None 表示方阵，严格对齐 numpy API
 template<typename T>
-py::array_t<T> eye(py::ssize_t N, py::ssize_t M = -1, int k = 0) {
+py::array_t<T> eye(py::ssize_t N, py::object M_obj = py::none(), int k = 0) {
     if (N < 0) throw std::invalid_argument("eye: N must be >= 0");
     size_t Ns = static_cast<size_t>(N);
-    size_t Ms = (M < 0) ? Ns : static_cast<size_t>(M);
-    py::array_t<T> result({N, (M < 0 ? N : M)});
+    py::ssize_t M_val = M_obj.is_none() ? N : M_obj.cast<py::ssize_t>();
+    if (M_val < 0) throw std::invalid_argument("eye: M must be >= 0");
+    size_t Ms = static_cast<size_t>(M_val);
+    py::array_t<T> result({N, M_val});
     numpy::eye(static_cast<T*>(result.request().ptr), Ns, Ms, k);
     return result;
 }
 
-inline py::array_t<double> eye(py::ssize_t N, py::ssize_t M = -1,
+inline py::array_t<double> eye(py::ssize_t N, py::object M_obj = py::none(),
                                 int k = 0) {
-    return eye<double>(N, M, k);
+    return eye<double>(N, M_obj, k);
 }
 
 // ── numpy.identity ───────────────────────────────────────────────────────────
