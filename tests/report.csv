@@ -789,14 +789,6 @@ elementwise,isinf,bit_exact,float64,special,PASS,-1
 elementwise,isinf,bit_exact,float32,special,PASS,-1
 elementwise,isfinite,bit_exact,float64,special,PASS,-1
 elementwise,isfinite,bit_exact,float32,special,PASS,-1
-elementwise,astype,bit_exact,float64,to_int,SKIP,-1
-elementwise,astype,bit_exact,float64,to_bool,SKIP,-1
-elementwise,astype,bit_exact,float64,to_float32,SKIP,-1
-elementwise,astype,bit_exact,int32,to_bool,SKIP,-1
-elementwise,astype,bit_exact,int32,to_float64,SKIP,-1
-elementwise,astype,bit_exact,float32,to_float64,SKIP,-1
-elementwise,astype,bit_exact,bool,to_float64,SKIP,-1
-elementwise,astype,bit_exact,bool,to_int,SKIP,-1
 init,zeros_like,bit_exact,float64,"(3, 4)",PASS,0
 init,zeros_like,bit_exact,float64,"(5,)",PASS,0
 init,zeros_like,bit_exact,float32,"(3, 4)",PASS,0

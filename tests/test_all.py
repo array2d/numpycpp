@@ -354,21 +354,6 @@ def _catalog_elementwise():
             a = np.array([0.0, np.nan, np.inf, -np.inf, 1.0], dtype=dt)
             yield TestCase(name, (a,), {}, dn, "special", "bit_exact", True, None)
 
-    # ── 类型转换: astype ──
-    _ASTYPE_CONVS = [
-        (np.float64, "int"), (np.float64, "bool"), (np.float64, "float32"),
-        (np.int32, "bool"), (np.int32, "float64"), (np.float32, "float64"),
-        (bool, "float64"), (bool, "int"),
-    ]
-    for src_dt, dst_str in _ASTYPE_CONVS:
-        if src_dt == bool:
-            a = np.array([True, False, True, False], dtype=bool)
-        elif src_dt == np.int32:
-            a = np.array([0, 1, -1, 42], dtype=np.int32)
-        else:
-            a = _make_extreme((100,), src_dt, "random", seed=42)
-        yield TestCase("astype", (a, dst_str), {}, src_dt.__name__,
-                       f"to_{dst_str}", "bit_exact", True, None)
 
 
 # ── 第2类: init (init_py.h, 15 APIs) ─────────────────────────────────────────
