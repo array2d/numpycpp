@@ -269,13 +269,21 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     auto dt  = arr.dtype();
 
     // py::dtype::of<float>() / py::dtype::of<double>() 在 Python 传入的
-    // numpy 数组上可能不匹配（已知 pybind11 问题）。用 dtype.kind() + itemsize 回退。
-    char _kind = dt.kind();
-    bool _is_f32 = (_kind == 'f' && buf.itemsize == 4);
-    bool _is_f64 = (_kind == 'f' && buf.itemsize == 8);
-    bool _is_i32 = (_kind == 'i' && buf.itemsize == 4);
-    bool _is_i64 = (_kind == 'i' && buf.itemsize == 8);
-    bool _is_bool = (_kind == 'b');
+    // numpy 数组上可能不匹配（已知 pybind11 问题）。用 buffer format + itemsize
+    // 回退——buf.format 来自 C API 的 PyObject_GetBuffer，不触发 Python 属性调用，
+    // 避免 astype 内递归。
+    char _fmt_char = buf.format.empty() ? '\0' :
+        (buf.format[0] == '<' || buf.format[0] == '>' || buf.format[0] == '=')
+        ? buf.format[1] : buf.format[0];
+    bool _is_f32  = (_fmt_char == 'f' && buf.itemsize == 4);
+    bool _is_f64  = (_fmt_char == 'd' && buf.itemsize == 8) ||
+                    (_fmt_char == 'f' && buf.itemsize == 8);
+    bool _is_i32  = (_fmt_char == 'i' && buf.itemsize == 4) ||
+                    (_fmt_char == 'l' && buf.itemsize == 4);
+    bool _is_i64  = (_fmt_char == 'i' && buf.itemsize == 8) ||
+                    (_fmt_char == 'l' && buf.itemsize == 8) ||
+                    (_fmt_char == 'q' && buf.itemsize == 8);
+    bool _is_bool = (_fmt_char == '?' || _fmt_char == 'b');
 
 #define _ASTYPE_MATCH(SrcT) \
     (dt.is(py::dtype::of<SrcT>()) || \
@@ -293,11 +301,25 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
         return r; \
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 目标字符串语义（严格对齐 numpy ndarray.astype() 行为）:
+    //
+    //   "float64" / "double" → C++ double (64-bit)
+    //   "float32"            → C++ float  (32-bit)
+    //   "float"              → C++ double (64-bit) ← 注意！numpy 中
+    //                          np.float64(1).astype(float) → float64
+    //                          np.float32(1).astype(float) → float64
+    //                          np.int32(1).astype(float)   → float64
+    //                          即 numpy 默认 float = float64，不是 float32
+    //   "int" / "int32"      → C++ int (32-bit)
+    //   "int64"              → C++ int64_t
+    //   "bool"               → C++ bool
+    // ═══════════════════════════════════════════════════════════════════════
     // float64
     _ASTYPE_CASE(double, "float64", double)
     _ASTYPE_CASE(double, "double",  double)
     _ASTYPE_CASE(double, "float32", float)
-    _ASTYPE_CASE(double, "float",   float)
+    _ASTYPE_CASE(double, "float",   double)   // numpy: float64.astype(float) → float64
     _ASTYPE_CASE(double, "int",     int)
     _ASTYPE_CASE(double, "int32",   int)
     _ASTYPE_CASE(double, "int64",   int64_t)
@@ -305,7 +327,7 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     // float32
     _ASTYPE_CASE(float, "float64", double)
     _ASTYPE_CASE(float, "double",  double)
-    _ASTYPE_CASE(float, "float",   double)
+    _ASTYPE_CASE(float, "float",   double)    // "float" → float64 (numpy 默认)
     _ASTYPE_CASE(float, "float32", float)
     _ASTYPE_CASE(float, "int",     int)
     _ASTYPE_CASE(float, "int32",   int)
@@ -317,7 +339,7 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     _ASTYPE_CASE(int, "float64", double)
     _ASTYPE_CASE(int, "double",  double)
     _ASTYPE_CASE(int, "float32", float)
-    _ASTYPE_CASE(int, "float",   float)
+    _ASTYPE_CASE(int, "float",   double)     // "float" → float64 (numpy 默认)
     _ASTYPE_CASE(int, "int64",   int64_t)
     _ASTYPE_CASE(int, "bool",    bool)
     // int64
@@ -325,7 +347,7 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     _ASTYPE_CASE(int64_t, "float64", double)
     _ASTYPE_CASE(int64_t, "double",  double)
     _ASTYPE_CASE(int64_t, "float32", float)
-    _ASTYPE_CASE(int64_t, "float",   float)
+    _ASTYPE_CASE(int64_t, "float",   double)  // "float" → float64 (numpy 默认)
     _ASTYPE_CASE(int64_t, "int",     int)
     _ASTYPE_CASE(int64_t, "int32",   int)
     _ASTYPE_CASE(int64_t, "bool",    bool)
@@ -334,7 +356,7 @@ inline py::array astype(const py::array& arr, const std::string& dtype) {
     _ASTYPE_CASE(bool, "float64", double)
     _ASTYPE_CASE(bool, "double",  double)
     _ASTYPE_CASE(bool, "float32", float)
-    _ASTYPE_CASE(bool, "float",   float)
+    _ASTYPE_CASE(bool, "float",   double)    // "float" → float64 (numpy 默认)
     _ASTYPE_CASE(bool, "int",     int)
     _ASTYPE_CASE(bool, "int32",   int)
     _ASTYPE_CASE(bool, "int64",   int64_t)
