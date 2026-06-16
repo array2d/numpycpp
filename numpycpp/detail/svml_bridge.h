@@ -148,29 +148,39 @@ NUMPY_SVML_F32(cbrt,  "__svml_cbrtf16", "npy_cbrtf")
 NUMPY_SVML_F32(expm1, "__svml_expm1f16","npy_expm1f")
 NUMPY_SVML_F32(log1p, "__svml_log1pf16","npy_log1pf")
 
-// pow / atan2 — SVML 2-arg
+// pow / atan2 — SVML 2-arg: 使用 __svml_pow8 / __svml_atan28 向量符号，
+// 广播标量到 __m512，调用 SVML 向量函数，提取结果。确保与 numpy 内部使用的
+// SVML 实现位级一致（npy_pow / npy_atan2 是标量 libm 回退，会差 1 ULP）。
 __attribute__((target("avx512f")))
 inline double pow_svml_f64(double x, double e) {
-    static auto fn = (double (*)(double, double))resolve_svml("npy_pow");
-    if (fn) return fn(x, e);
+    static auto fn = (__m512d (*)(__m512d, __m512d))resolve_svml("__svml_pow8");
+    if (fn) return _mm512_cvtsd_f64(fn(_mm512_set1_pd(x), _mm512_set1_pd(e)));
+    static auto scalar_fn = (double (*)(double, double))resolve_svml("npy_pow");
+    if (scalar_fn) return scalar_fn(x, e);
     return std::pow(x, e);
 }
 __attribute__((target("avx512f")))
 inline float pow_svml_f32(float x, float e) {
-    static auto fn = (float (*)(float, float))resolve_svml("npy_powf");
-    if (fn) return fn(x, e);
+    static auto fn = (__m512 (*)(__m512, __m512))resolve_svml("__svml_powf16");
+    if (fn) return _mm512_cvtss_f32(fn(_mm512_set1_ps(x), _mm512_set1_ps(e)));
+    static auto scalar_fn = (float (*)(float, float))resolve_svml("npy_powf");
+    if (scalar_fn) return scalar_fn(x, e);
     return std::pow(x, e);
 }
 __attribute__((target("avx512f")))
 inline double atan2_svml_f64(double y, double x) {
-    static auto fn = (double (*)(double, double))resolve_svml("npy_atan2");
-    if (fn) return fn(y, x);
+    static auto fn = (__m512d (*)(__m512d, __m512d))resolve_svml("__svml_atan28");
+    if (fn) return _mm512_cvtsd_f64(fn(_mm512_set1_pd(y), _mm512_set1_pd(x)));
+    static auto scalar_fn = (double (*)(double, double))resolve_svml("npy_atan2");
+    if (scalar_fn) return scalar_fn(y, x);
     return std::atan2(y, x);
 }
 __attribute__((target("avx512f")))
 inline float atan2_svml_f32(float y, float x) {
-    static auto fn = (float (*)(float, float))resolve_svml("npy_atan2f");
-    if (fn) return fn(y, x);
+    static auto fn = (__m512 (*)(__m512, __m512))resolve_svml("__svml_atan2f16");
+    if (fn) return _mm512_cvtss_f32(fn(_mm512_set1_ps(y), _mm512_set1_ps(x)));
+    static auto scalar_fn = (float (*)(float, float))resolve_svml("npy_atan2f");
+    if (scalar_fn) return scalar_fn(y, x);
     return std::atan2(y, x);
 }
 

@@ -97,7 +97,7 @@ inline void logspace(T* dst, T start, T stop, size_t num,
                      bool endpoint = true, T base = T(10)) {
     linspace(dst, start, stop, num, endpoint);
     for (size_t i = 0; i < num; ++i)
-        dst[i] = std::pow(base, dst[i]);
+        dst[i] = detail::pow(base, dst[i]);
 }
 
 // ============================================================================

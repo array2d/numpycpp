@@ -17,6 +17,18 @@
 // ════════════════════════════════════════════════════════════════════════════
 #pragma once
 
+// Internal math backend — loaded first so init.h et al. can use detail::pow etc.
+#ifndef NUMPYCPP_INTERNAL_INCLUDE
+#  define NUMPYCPP_INTERNAL_INCLUDE
+#  ifdef NUMPYCPP_STD_ONLY
+#    include "detail/std_math_backend.h"
+#  else
+#    include "detail/npy_math_float.h"
+#    include "detail/svml_bridge.h"
+#  endif
+#  undef NUMPYCPP_INTERNAL_INCLUDE
+#endif
+
 #include "init.h"
 #include "elementwise.h"
 #include "reduce.h"

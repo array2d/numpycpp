@@ -20,6 +20,7 @@
 #include <map>
 #include <set>
 #include <algorithm>
+#include <numeric>
 #include <stdexcept>
 #include <type_traits>
 #include <immintrin.h>   // SSE/AVX intrinsics (SSE2 is baseline on x86_64)
