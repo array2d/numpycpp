@@ -32,7 +32,6 @@ struct BufDtype {
     bool is_int32()   const { return kind == BufKind::INT32; }
     bool is_int64()   const { return kind == BufKind::INT64; }
     bool is_bool()    const { return kind == BufKind::BOOL; }
-    bool is_float()   const { return is_float32() || is_float64(); }
 };
 
 /// 纯 C++ 解析 buffer_info::format + itemsize，零 Python 调用。
