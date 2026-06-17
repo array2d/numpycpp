@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <type_traits>
+#include "detail/buffer_dtype.h"
 
 namespace py = pybind11;
 
@@ -263,110 +264,84 @@ DEF_SPECIAL(isfinite)
 // Type conversion
 // ============================================================================
 
-/// ndarray.astype(dtype) — unified dtype dispatch
+/// ndarray.astype(dtype) — unified dtype dispatch.
+/// 零 Python 调用: 仅通过 buf.format + itemsize (C API) 检测源类型；
+/// 不使用 py::dtype::is() / kind()，避免 Python↔C++ 递归。
+/// 目标必须显式指定精度: "float64"/"double", "float32", 不接受模糊的 "float"。
 inline py::array astype(const py::array& arr, const std::string& dtype) {
-    auto buf = arr.request();
-    auto dt  = arr.dtype();
+    auto buf = arr.request();                     // C API — 零 Python
+    auto src = detail::analyze_buffer(buf);       // 纯 C++ — 零 Python
+    auto dst = detail::target_dtype(dtype);
 
-    // py::dtype::of<float>() / py::dtype::of<double>() 在 Python 传入的
-    // numpy 数组上可能不匹配（已知 pybind11 问题）。用 buffer format + itemsize
-    // 回退——buf.format 来自 C API 的 PyObject_GetBuffer，不触发 Python 属性调用，
-    // 避免 astype 内递归。
-    char _fmt_char = buf.format.empty() ? '\0' :
-        (buf.format[0] == '<' || buf.format[0] == '>' || buf.format[0] == '=')
-        ? buf.format[1] : buf.format[0];
-    bool _is_f32  = (_fmt_char == 'f' && buf.itemsize == 4);
-    bool _is_f64  = (_fmt_char == 'd' && buf.itemsize == 8) ||
-                    (_fmt_char == 'f' && buf.itemsize == 8);
-    bool _is_i32  = (_fmt_char == 'i' && buf.itemsize == 4) ||
-                    (_fmt_char == 'l' && buf.itemsize == 4);
-    bool _is_i64  = (_fmt_char == 'i' && buf.itemsize == 8) ||
-                    (_fmt_char == 'l' && buf.itemsize == 8) ||
-                    (_fmt_char == 'q' && buf.itemsize == 8);
-    bool _is_bool = (_fmt_char == '?' || _fmt_char == 'b');
-
-#define _ASTYPE_MATCH(SrcT) \
-    (dt.is(py::dtype::of<SrcT>()) || \
-     (std::is_same<SrcT, float>::value  && _is_f32) || \
-     (std::is_same<SrcT, double>::value && _is_f64) || \
-     (std::is_same<SrcT, int>::value    && _is_i32) || \
-     (std::is_same<SrcT, int64_t>::value&& _is_i64) || \
-     (std::is_same<SrcT, bool>::value   && _is_bool))
-
-#define _ASTYPE_CASE(SrcT, dst_str, DstT) \
-    if (_ASTYPE_MATCH(SrcT) && (dtype == dst_str)) { \
-        py::array_t<DstT> r(buf.shape); \
-        numpy::astype<DstT, SrcT>(static_cast<const SrcT*>(buf.ptr), \
-                                   static_cast<DstT*>(r.request().ptr), buf.size); \
-        return r; \
+    if (dst.kind == detail::BufKind::UNKNOWN) {
+        auto dt = arr.dtype();  // 仅错误路径: 获取 dtype 名称用于报错
+        throw std::runtime_error(
+            "astype: unsupported target dtype '" + dtype + "'.  "
+            "Available: float64/double, float32, int/int32, int64, bool.  "
+            "Source: " + std::string(py::str(dt)));
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // 目标字符串语义（严格对齐 numpy ndarray.astype() 行为）:
-    //
-    //   "float64" / "double" → C++ double (64-bit)
-    //   "float32"            → C++ float  (32-bit)
-    //   "float"              → C++ double (64-bit) ← 注意！numpy 中
-    //                          np.float64(1).astype(float) → float64
-    //                          np.float32(1).astype(float) → float64
-    //                          np.int32(1).astype(float)   → float64
-    //                          即 numpy 默认 float = float64，不是 float32
-    //   "int" / "int32"      → C++ int (32-bit)
-    //   "int64"              → C++ int64_t
-    //   "bool"               → C++ bool
-    // ═══════════════════════════════════════════════════════════════════════
-    // float64
-    _ASTYPE_CASE(double, "float64", double)
-    _ASTYPE_CASE(double, "double",  double)
-    _ASTYPE_CASE(double, "float32", float)
-    _ASTYPE_CASE(double, "float",   double)   // numpy: float64.astype(float) → float64
-    _ASTYPE_CASE(double, "int",     int)
-    _ASTYPE_CASE(double, "int32",   int)
-    _ASTYPE_CASE(double, "int64",   int64_t)
-    _ASTYPE_CASE(double, "bool",    bool)
-    // float32
-    _ASTYPE_CASE(float, "float64", double)
-    _ASTYPE_CASE(float, "double",  double)
-    _ASTYPE_CASE(float, "float",   double)    // "float" → float64 (numpy 默认)
-    _ASTYPE_CASE(float, "float32", float)
-    _ASTYPE_CASE(float, "int",     int)
-    _ASTYPE_CASE(float, "int32",   int)
-    _ASTYPE_CASE(float, "int64",   int64_t)
-    _ASTYPE_CASE(float, "bool",    bool)
-    // int32
-    _ASTYPE_CASE(int, "int32",   int)
-    _ASTYPE_CASE(int, "int",     int)
-    _ASTYPE_CASE(int, "float64", double)
-    _ASTYPE_CASE(int, "double",  double)
-    _ASTYPE_CASE(int, "float32", float)
-    _ASTYPE_CASE(int, "float",   double)     // "float" → float64 (numpy 默认)
-    _ASTYPE_CASE(int, "int64",   int64_t)
-    _ASTYPE_CASE(int, "bool",    bool)
-    // int64
-    _ASTYPE_CASE(int64_t, "int64",   int64_t)
-    _ASTYPE_CASE(int64_t, "float64", double)
-    _ASTYPE_CASE(int64_t, "double",  double)
-    _ASTYPE_CASE(int64_t, "float32", float)
-    _ASTYPE_CASE(int64_t, "float",   double)  // "float" → float64 (numpy 默认)
-    _ASTYPE_CASE(int64_t, "int",     int)
-    _ASTYPE_CASE(int64_t, "int32",   int)
-    _ASTYPE_CASE(int64_t, "bool",    bool)
-    // bool
-    _ASTYPE_CASE(bool, "bool",    bool)
-    _ASTYPE_CASE(bool, "float64", double)
-    _ASTYPE_CASE(bool, "double",  double)
-    _ASTYPE_CASE(bool, "float32", float)
-    _ASTYPE_CASE(bool, "float",   double)    // "float" → float64 (numpy 默认)
-    _ASTYPE_CASE(bool, "int",     int)
-    _ASTYPE_CASE(bool, "int32",   int)
-    _ASTYPE_CASE(bool, "int64",   int64_t)
-#undef _ASTYPE_CASE
-#undef _ASTYPE_MATCH
+    // dispatch: 源类型 × 目标类型 → 调用对应模板实例
+    switch (src.kind) {
+    case detail::BufKind::FLOAT64:
+        switch (dst.kind) {
+        case detail::BufKind::FLOAT64: { py::array_t<double> r(buf.shape); numpy::astype<double,double>(static_cast<const double*>(buf.ptr),static_cast<double*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::FLOAT32: { py::array_t<float>  r(buf.shape); numpy::astype<float, double>(static_cast<const double*>(buf.ptr),static_cast<float*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT32:   { py::array_t<int>    r(buf.shape); numpy::astype<int,   double>(static_cast<const double*>(buf.ptr),static_cast<int*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT64:   { py::array_t<int64_t>r(buf.shape); numpy::astype<int64_t,double>(static_cast<const double*>(buf.ptr),static_cast<int64_t*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::BOOL:    { py::array_t<bool>   r(buf.shape); numpy::astype<bool,  double>(static_cast<const double*>(buf.ptr),static_cast<bool*>(r.request().ptr),buf.size); return r; }
+        default: break;
+        }
+        break;
+    case detail::BufKind::FLOAT32:
+        switch (dst.kind) {
+        case detail::BufKind::FLOAT64: { py::array_t<double> r(buf.shape); numpy::astype<double,float>(static_cast<const float*>(buf.ptr),static_cast<double*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::FLOAT32: { py::array_t<float>  r(buf.shape); numpy::astype<float, float>(static_cast<const float*>(buf.ptr),static_cast<float*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT32:   { py::array_t<int>    r(buf.shape); numpy::astype<int,   float>(static_cast<const float*>(buf.ptr),static_cast<int*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT64:   { py::array_t<int64_t>r(buf.shape); numpy::astype<int64_t,float>(static_cast<const float*>(buf.ptr),static_cast<int64_t*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::BOOL:    { py::array_t<bool>   r(buf.shape); numpy::astype<bool,  float>(static_cast<const float*>(buf.ptr),static_cast<bool*>(r.request().ptr),buf.size); return r; }
+        default: break;
+        }
+        break;
+    case detail::BufKind::INT32:
+        switch (dst.kind) {
+        case detail::BufKind::FLOAT64: { py::array_t<double> r(buf.shape); numpy::astype<double,int>(static_cast<const int*>(buf.ptr),static_cast<double*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::FLOAT32: { py::array_t<float>  r(buf.shape); numpy::astype<float, int>(static_cast<const int*>(buf.ptr),static_cast<float*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT32:   { py::array_t<int>    r(buf.shape); numpy::astype<int,   int>(static_cast<const int*>(buf.ptr),static_cast<int*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT64:   { py::array_t<int64_t>r(buf.shape); numpy::astype<int64_t,int>(static_cast<const int*>(buf.ptr),static_cast<int64_t*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::BOOL:    { py::array_t<bool>   r(buf.shape); numpy::astype<bool,  int>(static_cast<const int*>(buf.ptr),static_cast<bool*>(r.request().ptr),buf.size); return r; }
+        default: break;
+        }
+        break;
+    case detail::BufKind::INT64:
+        switch (dst.kind) {
+        case detail::BufKind::FLOAT64: { py::array_t<double> r(buf.shape); numpy::astype<double,int64_t>(static_cast<const int64_t*>(buf.ptr),static_cast<double*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::FLOAT32: { py::array_t<float>  r(buf.shape); numpy::astype<float, int64_t>(static_cast<const int64_t*>(buf.ptr),static_cast<float*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT32:   { py::array_t<int>    r(buf.shape); numpy::astype<int,   int64_t>(static_cast<const int64_t*>(buf.ptr),static_cast<int*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT64:   { py::array_t<int64_t>r(buf.shape); numpy::astype<int64_t,int64_t>(static_cast<const int64_t*>(buf.ptr),static_cast<int64_t*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::BOOL:    { py::array_t<bool>   r(buf.shape); numpy::astype<bool,  int64_t>(static_cast<const int64_t*>(buf.ptr),static_cast<bool*>(r.request().ptr),buf.size); return r; }
+        default: break;
+        }
+        break;
+    case detail::BufKind::BOOL:
+        switch (dst.kind) {
+        case detail::BufKind::FLOAT64: { py::array_t<double> r(buf.shape); numpy::astype<double,bool>(static_cast<const bool*>(buf.ptr),static_cast<double*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::FLOAT32: { py::array_t<float>  r(buf.shape); numpy::astype<float, bool>(static_cast<const bool*>(buf.ptr),static_cast<float*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT32:   { py::array_t<int>    r(buf.shape); numpy::astype<int,   bool>(static_cast<const bool*>(buf.ptr),static_cast<int*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::INT64:   { py::array_t<int64_t>r(buf.shape); numpy::astype<int64_t,bool>(static_cast<const bool*>(buf.ptr),static_cast<int64_t*>(r.request().ptr),buf.size); return r; }
+        case detail::BufKind::BOOL:    { py::array_t<bool>   r(buf.shape); numpy::astype<bool,  bool>(static_cast<const bool*>(buf.ptr),static_cast<bool*>(r.request().ptr),buf.size); return r; }
+        default: break;
+        }
+        break;
+    default:
+        break;
+    }
 
+    auto dt = arr.dtype();  // 仅错误路径
     throw std::runtime_error(
         "astype: unsupported conversion " + std::string(py::str(dt)) +
-        " -> " + dtype + ".  Available targets: float64/double, float32/float, "
-        "int/int32, int64, bool.");
+        " -> " + dtype + ".  Available targets: float64/double, float, "
+        "float32, int/int32, int64, bool.");
 }
 
 /// float64 → float32 → float64 roundtrip
