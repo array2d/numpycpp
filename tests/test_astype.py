@@ -3,16 +3,15 @@
 """
 import numpy as np, pytest, numpycpp as cpp
 
-# all source × target combinations
 _SRC = {"f64": lambda: np.array([1.5,-2.7,3.1], dtype=np.float64),
         "f32": lambda: np.array([1.5,-2.7,3.1], dtype=np.float32),
         "i32": lambda: np.array([1,-2,3], dtype=np.int32),
         "i64": lambda: np.array([1,-2,3], dtype=np.int64),
         "bool": lambda: np.array([True,False,True])}
-# numpy 约定: ndarray.astype(float) → float64, astype(int) → int32
+# 目标必须显式指定精度; "float" 已移除
 _EXPECT = {
     "float64": np.float64, "double": np.float64,
-    "float32": np.float32, "float":  np.float64,
+    "float32": np.float32,
     "int":     np.int32,   "int32":  np.int32,
     "int64":   np.int64,   "bool":   np.bool_,
 }
@@ -25,17 +24,22 @@ def test_astype(src, dst, exp_dt):
     assert r.dtype == exp_dt, f"{src}→{dst}: got {r.dtype}, expected {exp_dt}"
     assert np.array_equal(r, a.astype(exp_dt)), f"{src}→{dst}: value mismatch"
 
+def test_float_rejected():
+    """'float' 作为目标必须被拒绝（必须显式指定 float32/float64）"""
+    a = np.array([1.5], dtype=np.float64)
+    with pytest.raises(RuntimeError, match="unsupported.*target"):
+        cpp.astype(a, "float")
+
 @pytest.mark.parametrize("label,arr,expect_fallback", [
     ("f32 LE", np.array([1.5],dtype=np.float32), True),
     ("f32 BE", np.array([1.5],dtype='>f4'), True),
     ("f64 LE", np.array([1.5],dtype=np.float64), True),
-    ("i32",    np.array([1],dtype=np.int32), False),   # float fallback 不适用
-    ("bool",   np.array([True]), False),               # float fallback 不适用
+    ("i32",    np.array([1],dtype=np.int32), False),
+    ("bool",   np.array([True]), False),
 ])
 def test_dtype_diag(label, arr, expect_fallback):
     info = cpp._diag_astype_dtype(arr)
-    assert info["fallback_works"] == expect_fallback, \
-        f"{label}: fallback_works={info['fallback_works']} expect={expect_fallback}"
+    assert info["fallback_works"] == expect_fallback, f"{label}: {info['fallback_works']}"
 
 def test_no_recursion_32():
     for i in range(32):
