@@ -4,6 +4,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <dlfcn.h>
 #include "numpycpp/numpy_py.h"
 
 namespace py = pybind11;
@@ -39,6 +40,16 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(numpycpp, m) {
     m.doc() = "C++ pixel-level alignment of Python numpy, powered by Eigen";
+
+    // -- eager init: 预加载 g_svml_handle，加速首次 dlsym 调用。
+    //    resolve_svml() 自身也是 fork 安全的（pid 检测），这里只是预热。--
+    {
+        std::string path = numpy::detail::find_umath_path();
+        if (!path.empty()) {
+            numpy::detail::g_svml_handle = dlopen(path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+            numpy::detail::g_svml_pid = getpid();
+        }
+    }
 
     // -- 编译模式报告 ----------------------------------------------------------
     m.def("compile_mode", []() -> const char* {
@@ -76,6 +87,39 @@ PYBIND11_MODULE(numpycpp, m) {
         result["dtype.is(double)"]= dt_of_f64;
         result["fallback_works"]  = (is_f32 || is_f64 || dt_of_f32 || dt_of_f64);
         return result;
+    });
+
+    // -- atan2 dlsym 诊断 ----------------------------------------------------
+    m.def("_diag_atan2_dlsym", []() -> py::dict {
+        py::dict r;
+        std::string umath_path = numpy::detail::find_umath_path();
+        r["umath_path"] = umath_path.empty() ? "(null)" : umath_path;
+        if (!umath_path.empty()) {
+            void* h = dlopen(umath_path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+            r["dlopen_manual_ok"] = (h != nullptr);
+            if (!h) r["dlerror"] = dlerror();
+            numpy::detail::g_svml_handle = h;
+        }
+        r["handle_ok"] = (numpy::detail::g_svml_handle != nullptr);
+        // 尝试解析各种符号
+        void* sym_npy  = numpy::detail::g_svml_handle ?
+            dlsym(numpy::detail::g_svml_handle, "npy_atan2") : nullptr;
+        void* sym_svml = numpy::detail::g_svml_handle ?
+            dlsym(numpy::detail::g_svml_handle, "__svml_atan28") : nullptr;
+        void* sym_std  = dlsym(RTLD_DEFAULT, "atan2");
+        r["npy_atan2_ok"]    = (sym_npy != nullptr);
+        r["svml_atan28_ok"]  = (sym_svml != nullptr);
+        r["std_atan2_ok"]    = (sym_std != nullptr);
+        // 实际调用 npy_atan2
+        if (sym_npy) {
+            auto fn = (double (*)(double,double))sym_npy;
+            r["npy_test_val"] = fn(4.7294, 3.5340);
+        }
+        if (sym_std) {
+            auto fn = (double (*)(double,double))sym_std;
+            r["std_test_val"] = fn(4.7294, 3.5340);
+        }
+        return r;
     });
 
     // -- linalg submodule --------------------------------------------------
