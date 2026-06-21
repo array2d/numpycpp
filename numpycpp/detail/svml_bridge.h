@@ -40,18 +40,21 @@ Use #include "numpycpp/numpy.h" instead."
 namespace numpy {
 namespace detail {
 // Internal dispatch namespace — use numpy::exp() etc., not numpy::detail::exp().
-// All math functions are resolved at runtime from numpy's _multiarray_umath.so.
 //
-// 零 static 变量设计: 每次调用 dlsym 直接解析，避免 Python multiprocessing fork
-// 后子进程继承父进程的无效 handle 或函数指针。
+// fork 安全设计:
+//   g_svml_gen 是全局代计数器，fork 后自增，所有 resolve_cached<T>() 检测到
+//   代变化后自动重新 dlsym。spawn 模式一切从零初始化，无问题。
+//   static 缓存函数指针避免每元素 dlsym 开销。
+//
+//   find_umath_path() 保持无 static — 每次调用重新扫描 /proc/self/maps。
 
 #include <unistd.h>  // getpid
 
 inline void* g_svml_handle = nullptr;
-inline pid_t g_svml_pid = 0;   // fork 检测: pid 变化则重新初始化
+inline pid_t g_svml_pid = 0;
+inline int  g_svml_gen  = 0;    // fork 检测代计数器
 
-/// 返回 _multiarray_umath.so 的路径。每次调用重新扫描 /proc/self/maps，
-/// 无 static 缓存——fork 安全。
+/// 每次调用重新扫描 /proc/self/maps（无 static 缓存）
 inline std::string find_umath_path() {
     std::ifstream maps("/proc/self/maps");
     std::string line;
@@ -71,12 +74,13 @@ inline void bridge_init(const char* numpy_so_path) {
     (void)numpy_so_path;
 }
 
-/// 解析符号。fork 安全: 如果 pid 变化则重新 dlopen。
+/// 解析原始符号（无缓存）。fork 检测: pid 变化 → handle 作废 → 重建。
 inline void* resolve_svml(const char* name) {
     pid_t pid = getpid();
     if (pid != g_svml_pid) {
-        g_svml_handle = nullptr;   // fork 后父进程 handle 在子进程无效
+        g_svml_handle = nullptr;
         g_svml_pid = pid;
+        g_svml_gen++;              // 所有 resolve_cached 缓存失效
     }
     if (!g_svml_handle) {
         std::string path = find_umath_path();
@@ -85,6 +89,18 @@ inline void* resolve_svml(const char* name) {
     }
     if (g_svml_handle) return dlsym(g_svml_handle, name);
     return nullptr;
+}
+
+/// 带代缓存的符号解析。static 缓存 + fork 后自动重解析。
+template<typename FnSig>
+inline FnSig resolve_cached(const char* sym) {
+    static FnSig fn = nullptr;
+    static int gen = 0;
+    if (gen != g_svml_gen) {
+        fn = reinterpret_cast<FnSig>(resolve_svml(sym));
+        gen = g_svml_gen;
+    }
+    return fn;
 }
 
 // ============================================================================
@@ -109,15 +125,19 @@ inline bool cpu_has_avx512f() {
 #define NUMPY_SVML_F64(name, svml_sym, npy_sym)                         \
     __attribute__((target("avx512f")))                                   \
     inline double name##_svml_f64(double x) {                            \
-        auto fn = (__m512d (*)(__m512d))resolve_svml(svml_sym);   \
+        static auto fn = (__m512d(*)(__m512d))nullptr;                   \
+        static int _gen = -1;                                             \
+        if (_gen != g_svml_gen) { fn = (__m512d(*)(__m512d))resolve_svml(svml_sym); _gen = g_svml_gen; } \
         if (fn) return _mm512_cvtsd_f64(fn(_mm512_set1_pd(x)));         \
-        return std::name(x); /* fallback if SVML resolution fails */     \
+        return std::name(x);                                             \
     }
 
 #define NUMPY_SVML_F32(name, svml_sym, npy_sym)                         \
     __attribute__((target("avx512f")))                                   \
     inline float name##_svml_f32(float x) {                              \
-        auto fn = (__m512 (*)(__m512))resolve_svml(svml_sym);     \
+        static auto fn = (__m512(*)(__m512))nullptr;                     \
+        static int _gen = -1;                                             \
+        if (_gen != g_svml_gen) { fn = (__m512(*)(__m512))resolve_svml(svml_sym); _gen = g_svml_gen; } \
         if (fn) return _mm512_cvtss_f32(fn(_mm512_set1_ps(x)));         \
         return std::name(x);                                             \
     }
@@ -153,34 +173,34 @@ NUMPY_SVML_F32(log1p, "__svml_log1pf16","npy_log1pf")
 // SVML 实现位级一致（npy_pow / npy_atan2 是标量 libm 回退，会差 1 ULP）。
 __attribute__((target("avx512f")))
 inline double pow_svml_f64(double x, double e) {
-    auto fn = (__m512d (*)(__m512d, __m512d))resolve_svml("__svml_pow8");
+    static auto fn = (__m512d(*)(__m512d,__m512d))nullptr;
+    static int _gen = -1;
+    if (_gen != g_svml_gen) { fn = (__m512d(*)(__m512d,__m512d))resolve_svml("__svml_pow8"); _gen = g_svml_gen; }
     if (fn) return _mm512_cvtsd_f64(fn(_mm512_set1_pd(x), _mm512_set1_pd(e)));
-    auto scalar_fn = (double (*)(double, double))resolve_svml("npy_pow");
-    if (scalar_fn) return scalar_fn(x, e);
     return std::pow(x, e);
 }
 __attribute__((target("avx512f")))
 inline float pow_svml_f32(float x, float e) {
-    auto fn = (__m512 (*)(__m512, __m512))resolve_svml("__svml_powf16");
+    static auto fn = (__m512(*)(__m512,__m512))nullptr;
+    static int _gen = -1;
+    if (_gen != g_svml_gen) { fn = (__m512(*)(__m512,__m512))resolve_svml("__svml_powf16"); _gen = g_svml_gen; }
     if (fn) return _mm512_cvtss_f32(fn(_mm512_set1_ps(x), _mm512_set1_ps(e)));
-    auto scalar_fn = (float (*)(float, float))resolve_svml("npy_powf");
-    if (scalar_fn) return scalar_fn(x, e);
     return std::pow(x, e);
 }
 __attribute__((target("avx512f")))
 inline double atan2_svml_f64(double y, double x) {
-    auto fn = (__m512d (*)(__m512d, __m512d))resolve_svml("__svml_atan28");
+    static auto fn = (__m512d(*)(__m512d,__m512d))nullptr;
+    static int _gen = -1;
+    if (_gen != g_svml_gen) { fn = (__m512d(*)(__m512d,__m512d))resolve_svml("__svml_atan28"); _gen = g_svml_gen; }
     if (fn) return _mm512_cvtsd_f64(fn(_mm512_set1_pd(y), _mm512_set1_pd(x)));
-    auto scalar_fn = (double (*)(double, double))resolve_svml("npy_atan2");
-    if (scalar_fn) return scalar_fn(y, x);
     return std::atan2(y, x);
 }
 __attribute__((target("avx512f")))
 inline float atan2_svml_f32(float y, float x) {
-    auto fn = (__m512 (*)(__m512, __m512))resolve_svml("__svml_atan2f16");
+    static auto fn = (__m512(*)(__m512,__m512))nullptr;
+    static int _gen = -1;
+    if (_gen != g_svml_gen) { fn = (__m512(*)(__m512,__m512))resolve_svml("__svml_atan2f16"); _gen = g_svml_gen; }
     if (fn) return _mm512_cvtss_f32(fn(_mm512_set1_ps(y), _mm512_set1_ps(x)));
-    auto scalar_fn = (float (*)(float, float))resolve_svml("npy_atan2f");
-    if (scalar_fn) return scalar_fn(y, x);
     return std::atan2(y, x);
 }
 
@@ -196,14 +216,24 @@ inline float atan2_svml_f32(float y, float x) {
 
 #define NUMPY_NPY_F64(name, fallback_expr)                             \
     inline double name##_npy_f64(double x) {                            \
-        auto fn = (double (*)(double))resolve_svml("npy_" #name); \
+        static auto fn = (double(*)(double))nullptr;                    \
+        static int _gen = -1;                                            \
+        if (_gen != g_svml_gen) {                                       \
+            fn = (double(*)(double))resolve_svml("npy_" #name);         \
+            _gen = g_svml_gen;                                          \
+        }                                                              \
         if (fn) return fn(x);                                           \
         return (fallback_expr);                                         \
     }
 
 #define NUMPY_NPY_F32(name, fallback_expr)                              \
     inline float name##_npy_f32(float x) {                              \
-        auto fn = (float (*)(float))resolve_svml("npy_" #name "f"); \
+        static auto fn = (float(*)(float))nullptr;                      \
+        static int _gen = -1;                                            \
+        if (_gen != g_svml_gen) {                                       \
+            fn = (float(*)(float))resolve_svml("npy_" #name "f");       \
+            _gen = g_svml_gen;                                          \
+        }                                                              \
         if (fn) return fn(x);                                           \
         return (fallback_expr);                                         \
     }
@@ -247,22 +277,30 @@ inline double hypot_f64(double x, double y) { return std::hypot(x, y); }
 inline float  hypot_f32(float x, float y)   { return std::hypot(x, y); }
 
 inline double pow_npy_f64(double x, double e) {
-    auto fn = (double (*)(double, double))resolve_svml("npy_pow");
+    static auto fn = (double(*)(double,double))nullptr;
+    static int _gen = -1;
+    if (_gen != g_svml_gen) { fn = (double(*)(double,double))resolve_svml("npy_pow"); _gen = g_svml_gen; }
     if (fn) return fn(x, e);
     return std::pow(x, e);
 }
 inline float pow_npy_f32(float x, float e) {
-    auto fn = (float (*)(float, float))resolve_svml("npy_powf");
+    static auto fn = (float(*)(float,float))nullptr;
+    static int _gen = -1;
+    if (_gen != g_svml_gen) { fn = (float(*)(float,float))resolve_svml("npy_powf"); _gen = g_svml_gen; }
     if (fn) return fn(x, e);
     return std::pow(x, e);
 }
 inline double atan2_npy_f64(double y, double x) {
-    auto fn = (double (*)(double, double))resolve_svml("npy_atan2");
+    static auto fn = (double(*)(double,double))nullptr;
+    static int _gen = -1;
+    if (_gen != g_svml_gen) { fn = (double(*)(double,double))resolve_svml("npy_atan2"); _gen = g_svml_gen; }
     if (fn) return fn(y, x);
     return std::atan2(y, x);
 }
 inline float atan2_npy_f32(float y, float x) {
-    auto fn = (float (*)(float, float))resolve_svml("npy_atan2f");
+    static auto fn = (float(*)(float,float))nullptr;
+    static int _gen = -1;
+    if (_gen != g_svml_gen) { fn = (float(*)(float,float))resolve_svml("npy_atan2f"); _gen = g_svml_gen; }
     if (fn) return fn(y, x);
     return std::atan2(y, x);
 }
@@ -279,21 +317,21 @@ inline float atan2_npy_f32(float y, float x) {
 // Without -mavx512f: always use the scalar npy_* path — still bit-exact.
 // ============================================================================
 
+// 1-arg: SVML 优先 — __svml_exp8 等在非 AVX-512 上也是位级一致 (1000/1000)。
+// 2-arg: npy_* 优先 — pow_f64/atan2_f64 下方单独定义。
 #ifdef __AVX512F__
-#define DISPATCH_F64(name)                                              \
-    inline double name##_f64(double x) {                                 \
-        if (cpu_has_avx512f()) return name##_svml_f64(x);               \
-        return name##_npy_f64(x);                                        \
-    }
-#define DISPATCH_F32(name)                                              \
-    inline float name##_f32(float x) {                                   \
-        if (cpu_has_avx512f()) return name##_svml_f32(x);               \
-        return name##_npy_f32(x);                                        \
-    }
+#define DISPATCH_F64(name) \
+    inline double name##_f64(double x) { \
+        if (cpu_has_avx512f()) return name##_svml_f64(x); \
+        return name##_npy_f64(x); }
+#define DISPATCH_F32(name) \
+    inline float name##_f32(float x) { \
+        if (cpu_has_avx512f()) return name##_svml_f32(x); \
+        return name##_npy_f32(x); }
 #else
-#define DISPATCH_F64(name)                                              \
+#define DISPATCH_F64(name) \
     inline double name##_f64(double x) { return name##_npy_f64(x); }
-#define DISPATCH_F32(name)                                              \
+#define DISPATCH_F32(name) \
     inline float name##_f32(float x)  { return name##_npy_f32(x); }
 #endif
 
@@ -307,7 +345,7 @@ inline double sin_f64(double x) {
 #else
     double r = sin_npy_f64(x);
 #endif
-    if (__builtin_expect(x == 0.0 && r == 0.0, 0)) return x;  // ±0 → ±0
+    if (__builtin_expect(x == 0.0 && r == 0.0, 0)) return x;
     return r;
 }
 DISPATCH_F64(cos)
