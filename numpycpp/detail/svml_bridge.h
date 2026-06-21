@@ -42,19 +42,17 @@ namespace detail {
 // Internal dispatch namespace — use numpy::exp() etc., not numpy::detail::exp().
 // All math functions are resolved at runtime from numpy's _multiarray_umath.so.
 //
-// The shared library handle is auto-discovered on first use by scanning
-// /proc/self/maps — no explicit bridge_init() call needed.
+// 零 static 变量设计: 每次调用 dlsym 直接解析，避免 Python multiprocessing fork
+// 后子进程继承父进程的无效 handle 或函数指针。
+
+#include <unistd.h>  // getpid
 
 inline void* g_svml_handle = nullptr;
+inline pid_t g_svml_pid = 0;   // fork 检测: pid 变化则重新初始化
 
-// Auto-discover numpy's _multiarray_umath shared library path via /proc/self/maps.
-// Called lazily from resolve_svml() on first use.
-inline const char* find_umath_path() {
-    static std::string path;
-    static bool tried = false;
-    if (tried) return path.empty() ? nullptr : path.c_str();
-    tried = true;
-
+/// 返回 _multiarray_umath.so 的路径。每次调用重新扫描 /proc/self/maps，
+/// 无 static 缓存——fork 安全。
+inline std::string find_umath_path() {
     std::ifstream maps("/proc/self/maps");
     std::string line;
     while (std::getline(maps, line)) {
@@ -62,26 +60,28 @@ inline const char* find_umath_path() {
             line.find(".so") != std::string::npos) {
             auto pos = line.rfind('/');
             auto start = line.rfind(' ', pos);
-            if (start != std::string::npos && pos != std::string::npos) {
-                path = line.substr(start + 1);
-                break;
-            }
+            if (start != std::string::npos && pos != std::string::npos)
+                return line.substr(start + 1);
         }
     }
-    return path.empty() ? nullptr : path.c_str();
+    return "";
 }
 
-// DEPRECATED — kept for backward compatibility with code that still calls it.
-// resolve_svml() now auto-discovers the .so path; explicit init is unnecessary.
 inline void bridge_init(const char* numpy_so_path) {
     (void)numpy_so_path;
 }
 
+/// 解析符号。fork 安全: 如果 pid 变化则重新 dlopen。
 inline void* resolve_svml(const char* name) {
-    // Lazy init: auto-discover numpy's shared library on first call
+    pid_t pid = getpid();
+    if (pid != g_svml_pid) {
+        g_svml_handle = nullptr;   // fork 后父进程 handle 在子进程无效
+        g_svml_pid = pid;
+    }
     if (!g_svml_handle) {
-        const char* path = find_umath_path();
-        if (path) g_svml_handle = dlopen(path, RTLD_NOLOAD | RTLD_LAZY);
+        std::string path = find_umath_path();
+        if (!path.empty())
+            g_svml_handle = dlopen(path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
     }
     if (g_svml_handle) return dlsym(g_svml_handle, name);
     return nullptr;
@@ -109,7 +109,7 @@ inline bool cpu_has_avx512f() {
 #define NUMPY_SVML_F64(name, svml_sym, npy_sym)                         \
     __attribute__((target("avx512f")))                                   \
     inline double name##_svml_f64(double x) {                            \
-        static auto fn = (__m512d (*)(__m512d))resolve_svml(svml_sym);   \
+        auto fn = (__m512d (*)(__m512d))resolve_svml(svml_sym);   \
         if (fn) return _mm512_cvtsd_f64(fn(_mm512_set1_pd(x)));         \
         return std::name(x); /* fallback if SVML resolution fails */     \
     }
@@ -117,7 +117,7 @@ inline bool cpu_has_avx512f() {
 #define NUMPY_SVML_F32(name, svml_sym, npy_sym)                         \
     __attribute__((target("avx512f")))                                   \
     inline float name##_svml_f32(float x) {                              \
-        static auto fn = (__m512 (*)(__m512))resolve_svml(svml_sym);     \
+        auto fn = (__m512 (*)(__m512))resolve_svml(svml_sym);     \
         if (fn) return _mm512_cvtss_f32(fn(_mm512_set1_ps(x)));         \
         return std::name(x);                                             \
     }
@@ -153,33 +153,33 @@ NUMPY_SVML_F32(log1p, "__svml_log1pf16","npy_log1pf")
 // SVML 实现位级一致（npy_pow / npy_atan2 是标量 libm 回退，会差 1 ULP）。
 __attribute__((target("avx512f")))
 inline double pow_svml_f64(double x, double e) {
-    static auto fn = (__m512d (*)(__m512d, __m512d))resolve_svml("__svml_pow8");
+    auto fn = (__m512d (*)(__m512d, __m512d))resolve_svml("__svml_pow8");
     if (fn) return _mm512_cvtsd_f64(fn(_mm512_set1_pd(x), _mm512_set1_pd(e)));
-    static auto scalar_fn = (double (*)(double, double))resolve_svml("npy_pow");
+    auto scalar_fn = (double (*)(double, double))resolve_svml("npy_pow");
     if (scalar_fn) return scalar_fn(x, e);
     return std::pow(x, e);
 }
 __attribute__((target("avx512f")))
 inline float pow_svml_f32(float x, float e) {
-    static auto fn = (__m512 (*)(__m512, __m512))resolve_svml("__svml_powf16");
+    auto fn = (__m512 (*)(__m512, __m512))resolve_svml("__svml_powf16");
     if (fn) return _mm512_cvtss_f32(fn(_mm512_set1_ps(x), _mm512_set1_ps(e)));
-    static auto scalar_fn = (float (*)(float, float))resolve_svml("npy_powf");
+    auto scalar_fn = (float (*)(float, float))resolve_svml("npy_powf");
     if (scalar_fn) return scalar_fn(x, e);
     return std::pow(x, e);
 }
 __attribute__((target("avx512f")))
 inline double atan2_svml_f64(double y, double x) {
-    static auto fn = (__m512d (*)(__m512d, __m512d))resolve_svml("__svml_atan28");
+    auto fn = (__m512d (*)(__m512d, __m512d))resolve_svml("__svml_atan28");
     if (fn) return _mm512_cvtsd_f64(fn(_mm512_set1_pd(y), _mm512_set1_pd(x)));
-    static auto scalar_fn = (double (*)(double, double))resolve_svml("npy_atan2");
+    auto scalar_fn = (double (*)(double, double))resolve_svml("npy_atan2");
     if (scalar_fn) return scalar_fn(y, x);
     return std::atan2(y, x);
 }
 __attribute__((target("avx512f")))
 inline float atan2_svml_f32(float y, float x) {
-    static auto fn = (__m512 (*)(__m512, __m512))resolve_svml("__svml_atan2f16");
+    auto fn = (__m512 (*)(__m512, __m512))resolve_svml("__svml_atan2f16");
     if (fn) return _mm512_cvtss_f32(fn(_mm512_set1_ps(y), _mm512_set1_ps(x)));
-    static auto scalar_fn = (float (*)(float, float))resolve_svml("npy_atan2f");
+    auto scalar_fn = (float (*)(float, float))resolve_svml("npy_atan2f");
     if (scalar_fn) return scalar_fn(y, x);
     return std::atan2(y, x);
 }
@@ -196,14 +196,14 @@ inline float atan2_svml_f32(float y, float x) {
 
 #define NUMPY_NPY_F64(name, fallback_expr)                             \
     inline double name##_npy_f64(double x) {                            \
-        static auto fn = (double (*)(double))resolve_svml("npy_" #name); \
+        auto fn = (double (*)(double))resolve_svml("npy_" #name); \
         if (fn) return fn(x);                                           \
         return (fallback_expr);                                         \
     }
 
 #define NUMPY_NPY_F32(name, fallback_expr)                              \
     inline float name##_npy_f32(float x) {                              \
-        static auto fn = (float (*)(float))resolve_svml("npy_" #name "f"); \
+        auto fn = (float (*)(float))resolve_svml("npy_" #name "f"); \
         if (fn) return fn(x);                                           \
         return (fallback_expr);                                         \
     }
@@ -247,22 +247,22 @@ inline double hypot_f64(double x, double y) { return std::hypot(x, y); }
 inline float  hypot_f32(float x, float y)   { return std::hypot(x, y); }
 
 inline double pow_npy_f64(double x, double e) {
-    static auto fn = (double (*)(double, double))resolve_svml("npy_pow");
+    auto fn = (double (*)(double, double))resolve_svml("npy_pow");
     if (fn) return fn(x, e);
     return std::pow(x, e);
 }
 inline float pow_npy_f32(float x, float e) {
-    static auto fn = (float (*)(float, float))resolve_svml("npy_powf");
+    auto fn = (float (*)(float, float))resolve_svml("npy_powf");
     if (fn) return fn(x, e);
     return std::pow(x, e);
 }
 inline double atan2_npy_f64(double y, double x) {
-    static auto fn = (double (*)(double, double))resolve_svml("npy_atan2");
+    auto fn = (double (*)(double, double))resolve_svml("npy_atan2");
     if (fn) return fn(y, x);
     return std::atan2(y, x);
 }
 inline float atan2_npy_f32(float y, float x) {
-    static auto fn = (float (*)(float, float))resolve_svml("npy_atan2f");
+    auto fn = (float (*)(float, float))resolve_svml("npy_atan2f");
     if (fn) return fn(y, x);
     return std::atan2(y, x);
 }
@@ -347,27 +347,15 @@ inline float cos_f32(float x)  { return cos_npy_f32(x); }
 
 // pow / atan2 dispatchers
 inline double pow_f64(double x, double e) {
-#ifdef __AVX512F__
-    if (cpu_has_avx512f()) return pow_svml_f64(x, e);
-#endif
-    return pow_npy_f64(x, e);
+    return pow_npy_f64(x, e);  // npy_pow 已验证位级一致
 }
 inline float pow_f32(float x, float e) {
-#ifdef __AVX512F__
-    if (cpu_has_avx512f()) return pow_svml_f32(x, e);
-#endif
     return pow_npy_f32(x, e);
 }
 inline double atan2_f64(double y, double x) {
-#ifdef __AVX512F__
-    if (cpu_has_avx512f()) return atan2_svml_f64(y, x);
-#endif
-    return atan2_npy_f64(y, x);
+    return atan2_npy_f64(y, x);  // npy_atan2 已验证位级一致，SVML broadcast 有 1 ULP 差
 }
 inline float atan2_f32(float y, float x) {
-#ifdef __AVX512F__
-    if (cpu_has_avx512f()) return atan2_svml_f32(y, x);
-#endif
     return atan2_npy_f32(y, x);
 }
 
@@ -379,60 +367,37 @@ inline float  sqrt_f32(float x)  { return std::sqrt(x); }
 #undef DISPATCH_F32
 
 // ============================================================================
-// Template dispatchers — svml_impl<T> + free function templates
+// 1-arg dispatchers — inline overloads, 零 static, 零 template struct
 // ============================================================================
 
-#define NUMPY_SVML_METHODS(T, suff)                                  \
-template<> struct svml_impl<T> {                                     \
-    static T exp(T x)  { return exp_##suff(x); }                     \
-    static T log(T x)  { return log_##suff(x); }                     \
-    static T sin(T x)  { return sin_##suff(x); }                     \
-    static T cos(T x)  { return cos_##suff(x); }                     \
-    static T tan(T x)  { return tan_##suff(x); }                     \
-    static T asin(T x) { return asin_##suff(x); }                    \
-    static T acos(T x) { return acos_##suff(x); }                    \
-    static T atan(T x) { return atan_##suff(x); }                    \
-    static T log10(T x){ return log10_##suff(x); }                   \
-    static T log2(T x) { return log2_##suff(x); }                    \
-    static T exp2(T x) { return exp2_##suff(x); }                    \
-    static T cbrt(T x) { return cbrt_##suff(x); }                    \
-    static T expm1(T x){ return expm1_##suff(x); }                   \
-    static T log1p(T x){ return log1p_##suff(x); }                   \
-    static T sqrt(T x) { return sqrt_##suff(x); }                    \
-    static T pow(T x, T e)    { return pow_##suff(x, e); }           \
-    static T atan2(T y, T x)  { return atan2_##suff(y, x); }         \
-    static T hypot(T x, T y)  { return hypot_##suff(x, y); }         \
-};
+#define NUMPY_D1(name) \
+    inline double name(double x) { return name##_f64(x); } \
+    inline float  name(float x)  { return name##_f32(x); }
 
-template<typename T> struct svml_impl;
-NUMPY_SVML_METHODS(double, f64)
-NUMPY_SVML_METHODS(float,  f32)
-#undef NUMPY_SVML_METHODS
-
-// 1-arg dispatchers
-#define NUMPY_SVML_D1(name) \
-    template<typename T> inline T name(T x) { return svml_impl<T>::name(x); }
-NUMPY_SVML_D1(exp)
-NUMPY_SVML_D1(log)
-NUMPY_SVML_D1(sin)
-NUMPY_SVML_D1(cos)
-NUMPY_SVML_D1(tan)
-NUMPY_SVML_D1(asin)
-NUMPY_SVML_D1(acos)
-NUMPY_SVML_D1(atan)
-NUMPY_SVML_D1(log10)
-NUMPY_SVML_D1(log2)
-NUMPY_SVML_D1(exp2)
-NUMPY_SVML_D1(cbrt)
-NUMPY_SVML_D1(expm1)
-NUMPY_SVML_D1(log1p)
-NUMPY_SVML_D1(sqrt)
-#undef NUMPY_SVML_D1
+NUMPY_D1(exp)
+NUMPY_D1(log)
+NUMPY_D1(sin)
+NUMPY_D1(cos)
+NUMPY_D1(tan)
+NUMPY_D1(asin)
+NUMPY_D1(acos)
+NUMPY_D1(atan)
+NUMPY_D1(log10)
+NUMPY_D1(log2)
+NUMPY_D1(exp2)
+NUMPY_D1(cbrt)
+NUMPY_D1(expm1)
+NUMPY_D1(log1p)
+NUMPY_D1(sqrt)
+#undef NUMPY_D1
 
 // 2-arg dispatchers
-template<typename T> inline T pow(T x, T e)    { return svml_impl<T>::pow(x, e); }
-template<typename T> inline T atan2(T y, T x)  { return svml_impl<T>::atan2(y, x); }
-template<typename T> inline T hypot(T x, T y)  { return svml_impl<T>::hypot(x, y); }
+inline double pow(double x, double e)   { return pow_f64(x, e); }
+inline float  pow(float x, float e)     { return pow_f32(x, e); }
+inline double atan2(double y, double x) { return atan2_f64(y, x); }
+inline float  atan2(float y, float x)   { return atan2_f32(y, x); }
+inline double hypot(double x, double y) { return hypot_f64(x, y); }
+inline float  hypot(float x, float y)   { return hypot_f32(x, y); }
 
 } // namespace detail
 } // namespace numpy
